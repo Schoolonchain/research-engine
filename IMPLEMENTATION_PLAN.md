@@ -199,6 +199,8 @@ Orden explícita requerida: **“Fase 4 aprobada. Integra la PR y comienza con l
 
 ## Fase 5 — Fuentes, afirmaciones y evidencias
 
+**Estado: IMPLEMENTADA LOCALMENTE EL 2026-07-24; pendiente de auditoría y checkpoint humano.**
+
 ### Objetivo
 
 Capturar Source, Claim y Evidence como conceptos separados.
@@ -219,6 +221,20 @@ Capturar Source, Claim y Evidence como conceptos separados.
 ### Criterio de éxito
 
 Relaciones trazables, entrada renderizada de forma segura y fetcher resistente a SSRF.
+
+### Resultado verificado
+
+- Source, Claim y Evidence separados y relacionados.
+- URL HTTP/HTTPS canónica y deduplicada por Proposal.
+- Fetcher aislado con revalidación DNS por salto y límites de MIME, bytes y timeout.
+- API autenticada sin confiar en identidad del body.
+- Eventos minimizados y Outbox atómico.
+- 53 tests pasan; typecheck y build pasan.
+- Ninguna contribución crea Authorization, ResearchJob ni ejecuta IA.
+
+### Gate
+
+Orden explícita requerida: **“Fase 5 aprobada. Integra la PR y comienza con la Fase 6.”**
 
 ## Fase 6 — Score y elegibilidad
 

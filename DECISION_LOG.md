@@ -343,3 +343,24 @@ propuesta no se considera aprobada hasta recibir confirmación humana.
 - Motivo: `ON CONFLICT` no evita evaluar el `count(*)` de su consulta fuente.
 - Consecuencia: cada ID puede requerir un único backfill; readiness posterior tiene coste
   proporcional al número de claves, no al número de apoyos.
+
+## D-040 — Source, Claim y Evidence como entidades independientes
+
+- Fecha: 2026-07-24
+- Estado: IMPLEMENTADA; PENDIENTE DE APROBACIÓN HUMANA DE FASE 5
+- Decisión: no incorporar afirmaciones o evidencia dentro de blobs de Source.
+- Motivo: preservar trazabilidad, contradicción y moderación independiente.
+
+## D-041 — Fetcher mediante resolver y transporte inyectables
+
+- Fecha: 2026-07-24
+- Estado: IMPLEMENTADA; PENDIENTE DE APROBACIÓN HUMANA DE FASE 5
+- Decisión: validar URL y todas las respuestas DNS antes de delegar una conexión.
+- Motivo: bloquear SSRF, redirecciones internas y DNS rebinding sin acoplar una librería HTTP.
+
+## D-042 — Contenido contribuido siempre no confiable
+
+- Fecha: 2026-07-24
+- Estado: IMPLEMENTADA; PENDIENTE DE APROBACIÓN HUMANA DE FASE 5
+- Decisión: almacenar statement, excerpt y context como texto sin renderizado HTML.
+- Motivo: la sanitización de entrada no sustituye el escaping contextual del consumidor.

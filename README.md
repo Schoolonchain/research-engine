@@ -6,11 +6,11 @@ Knowledge Hub.
 
 ## Estado
 
-**Fase 4 — Participación y apoyos.**
+**Fase 5 — Fuentes, afirmaciones y evidencias; pendiente de auditoría.**
 
-El repositorio define constructores Fastify para Proposal y Participation, pero todavía no
-incluye un punto de entrada desplegable ni ejecuta investigación. La presencia de las tablas
-`authorizations` y `research_jobs` no habilita ningún flujo operativo.
+El repositorio define constructores Fastify para Proposal, Participation y contribuciones de
+conocimiento, pero todavía no incluye un punto de entrada desplegable ni ejecuta investigación.
+La presencia de `authorizations` y `research_jobs` no habilita ningún flujo operativo.
 
 ## Requisitos
 
