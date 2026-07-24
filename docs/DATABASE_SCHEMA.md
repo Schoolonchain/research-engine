@@ -1,6 +1,9 @@
 # Modelo de datos — Fase 1
 
-Fuente ejecutable: `migrations/0001_initial_domain.sql`.
+Fuentes ejecutables:
+
+- `migrations/0001_initial_domain.sql`
+- `migrations/0002_events_outbox.sql`
 
 ## Agregados principales
 
@@ -15,6 +18,10 @@ Actor
          |--> Score --> ScorePolicy
          |
          +--> Authorization --> ResearchJob --> ResearchResult
+
+AggregateStream --> DomainEvent --> OutboxMessage
+                         |
+                         +--> ConsumerReceipt --> AggregateEventCount
 ```
 
 ## Identidad y concurrencia
@@ -85,7 +92,7 @@ CONFLICTING_EVIDENCE y CITATIONS separados en documentos JSON.
 
 Los tests ejecutan la migración sobre PostgreSQL embebido y comprueban:
 
-1. creación de las doce tablas previstas;
+1. creación de las diecisiete tablas previstas;
 2. segunda ejecución idempotente;
 3. relaciones separadas Source–Claim–Evidence;
 4. rechazo de apoyos activos duplicados;
@@ -94,9 +101,33 @@ Los tests ejecutan la migración sobre PostgreSQL embebido y comprueban:
 7. límites estructurales de consumo;
 8. ausencia de identificadores específicos de Notion.
 
+## Tablas de eventos y procesamiento
+
+### aggregate_streams
+
+Contador de secuencia por tipo/ID de agregado. Permite compare-and-increment transaccional y
+detecta escritores obsoletos.
+
+### domain_events
+
+Envelope append-only, versionado y ordenado por agregado. Triggers bloquean alteración y
+borrado.
+
+### outbox_messages
+
+Referencia entregable al evento con estado, intentos, disponibilidad y lease. El payload no se
+duplica.
+
+### consumer_receipts
+
+Clave única consumidor/evento para hacer idempotente el efecto de cada consumidor.
+
+### aggregate_event_counts
+
+Proyección mínima usada para demostrar reentrega segura y orden de procesamiento.
+
 ## Límites deliberados
 
-- Event Log, Outbox y proyecciones pertenecen a Fase 2.
 - Servicios de Proposal pertenecen a Fase 3.
 - Cálculo de identidad antiabuso pertenece a Fase 4.
 - Obtención segura de URLs pertenece a Fase 5.
