@@ -7,6 +7,7 @@ export interface Environment {
   readonly databasePoolMax: number;
   readonly databaseIdleTimeoutMs: number;
   readonly databaseConnectionTimeoutMs: number;
+  readonly participationHmacKey: string;
 }
 
 function required(
@@ -65,6 +66,13 @@ function postgresUrl(source: NodeJS.ProcessEnv): string {
 export function loadEnvironment(
   source: NodeJS.ProcessEnv = process.env,
 ): Environment {
+  const participationHmacKey = required(source, "PARTICIPATION_HMAC_KEY");
+  if (participationHmacKey.length < 32) {
+    throw new Error(
+      "PARTICIPATION_HMAC_KEY must contain at least 32 characters",
+    );
+  }
+
   return Object.freeze({
     nodeEnv: nodeEnvironment(source),
     databaseUrl: postgresUrl(source),
@@ -79,6 +87,7 @@ export function loadEnvironment(
       "DATABASE_CONNECTION_TIMEOUT_MS",
       5_000,
     ),
+    participationHmacKey,
   });
 }
 

@@ -4,6 +4,7 @@ Fuentes ejecutables:
 
 - `migrations/0001_initial_domain.sql`
 - `migrations/0002_events_outbox.sql`
+- `migrations/0003_participation_controls.sql`
 
 ## Agregados principales
 
@@ -126,10 +127,19 @@ Clave única consumidor/evento para hacer idempotente el efecto de cada consumid
 
 Proyección mínima usada para demostrar reentrega segura y orden de procesamiento.
 
+### participation_rate_limits
+
+Contadores por ventana y scope `SUBJECT`, `NETWORK` o `GLOBAL`. Solo conserva claves HMAC,
+límite aplicado y expiración.
+
+### abuse_signals
+
+Señales minimizadas y temporales generadas al exceder límites. No almacena IP, sujeto ni
+identidad directa.
+
 ## Límites deliberados
 
 - Servicios de Proposal pertenecen a Fase 3.
-- Cálculo de identidad antiabuso pertenece a Fase 4.
 - Obtención segura de URLs pertenece a Fase 5.
 - Cálculo de score pertenece a Fase 6.
 - Autenticación administrativa pertenece a Fase 7.

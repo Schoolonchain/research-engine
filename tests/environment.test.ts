@@ -6,6 +6,7 @@ import { poolConfig } from "../src/db/client.js";
 const validEnvironment = {
   NODE_ENV: "test",
   DATABASE_URL: "postgresql://user:password@localhost:5432/research_engine",
+  PARTICIPATION_HMAC_KEY: "test-participation-key-at-least-32-characters",
 } satisfies NodeJS.ProcessEnv;
 
 describe("environment", () => {
@@ -21,7 +22,13 @@ describe("environment", () => {
   });
 
   it("rejects a missing database URL", () => {
-    expect(() => loadEnvironment({ NODE_ENV: "test" })).toThrow(
+    expect(() =>
+      loadEnvironment({
+        NODE_ENV: "test",
+        PARTICIPATION_HMAC_KEY:
+          "test-participation-key-at-least-32-characters",
+      }),
+    ).toThrow(
       "Missing required environment variable: DATABASE_URL",
     );
   });
@@ -42,6 +49,17 @@ describe("environment", () => {
         DATABASE_POOL_MAX: "0",
       }),
     ).toThrow("DATABASE_POOL_MAX must be a positive integer");
+  });
+
+  it("rejects a weak participation HMAC key", () => {
+    expect(() =>
+      loadEnvironment({
+        ...validEnvironment,
+        PARTICIPATION_HMAC_KEY: "too-short",
+      }),
+    ).toThrow(
+      "PARTICIPATION_HMAC_KEY must contain at least 32 characters",
+    );
   });
 });
 

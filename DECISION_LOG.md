@@ -220,3 +220,44 @@ propuesta no se considera aprobada hasta recibir confirmación humana.
 - Motivo: el Event Log es inmutable y puede tener retención prolongada.
 - Consecuencia: el estado actual conserva el contenido; la auditoría demuestra cambios sin
   conservar versiones textuales completas.
+
+## D-026 — Identidad estable separada de señal de red
+
+- Fecha: 2026-07-24
+- Estado: ACEPTADA EN FASE 4
+- Decisión: deduplicar por sujeto estable y usar red solo como señal adicional.
+- Motivo: una IP no representa una persona y una persona puede cambiar de IP.
+- Consecuencia: compartir red no impide apoyar; cambiar de red no evita deduplicación.
+
+## D-027 — Pseudonimización mediante HMAC con separación de dominio
+
+- Fecha: 2026-07-24
+- Estado: ACEPTADA EN FASE 4
+- Decisión: derivar claves de sujeto/red con HMAC-SHA-256 y prefijos distintos.
+- Motivo: un hash simple permitiría ataques de diccionario y correlación.
+- Consecuencia: `PARTICIPATION_HMAC_KEY` es secreto obligatorio y requiere rotación versionada.
+
+## D-028 — Rate limits persistentes y multidimensionales
+
+- Fecha: 2026-07-24
+- Estado: ACEPTADA EN FASE 4
+- Decisión: límites independientes por SUBJECT, NETWORK y GLOBAL.
+- Motivo: evitar depender de una única señal y proteger recursos compartidos.
+- Consecuencia: las políticas son versionables; NETWORK usa un límite más tolerante.
+
+## D-029 — Señales antiabuso con retención explícita
+
+- Fecha: 2026-07-24
+- Estado: ACEPTADA EN FASE 4
+- Decisión: registrar solo scope, HMAC, riesgo, versión y expiración.
+- Motivo: detectar automatización sin conservar identificadores directos.
+- Consecuencia: un proceso operativo futuro deberá purgar filas expiradas.
+
+## D-030 — CAPTCHA fuera del núcleo de participación
+
+- Fecha: 2026-07-24
+- Estado: ACEPTADA EN FASE 4
+- Decisión: el resolver de identidad puede exigir challenge adaptativo; el dominio no elige
+  proveedor ni almacena tokens CAPTCHA.
+- Motivo: mantener independencia de proveedor y evitar contaminar el Event Log.
+- Consecuencia: la integración concreta se define con la superficie de identidad/despliegue.
