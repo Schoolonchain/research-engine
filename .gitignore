@@ -1,0 +1,13 @@
+node_modules/
+.pnpm-store/
+dist/
+coverage/
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
+Thumbs.db
+
+# Copia local de producción usada solo para inspección en Fase 0.
+knowledg_hub-public-reference/
