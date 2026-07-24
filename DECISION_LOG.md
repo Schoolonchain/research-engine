@@ -294,3 +294,31 @@ propuesta no se considera aprobada hasta recibir confirmación humana.
 - Decisión: tres intentos con backoff exponencial y jitter; después `503` + `Retry-After`.
 - Motivo: evitar `500` ambiguo y reducir contención inmediata.
 - Consecuencia: clientes pueden reintentar sin interpretar el fallo como corrupción.
+
+## D-035 — Guard de cobertura del keyring
+
+- Fecha: 2026-07-24
+- Estado: CORRECCIÓN DE REAUDITORÍA; PENDIENTE DE APROBACIÓN HUMANA
+- Decisión: bloquear activación y operaciones si una clave usada por apoyos activos falta del
+  keyring configurado.
+- Motivo: una retirada prematura no puede reactivar apoyos duplicados.
+- Consecuencia: el despliegue debe invocar `assertReady()` y las operaciones repiten el guard.
+
+## D-036 — Locks pseudónimos temporales
+
+- Fecha: 2026-07-24
+- Estado: CORRECCIÓN DE REAUDITORÍA; PENDIENTE DE APROBACIÓN HUMANA
+- Decisión: crear locks solo para Proposals válidas, renovarlos por 24 horas y purgar los
+  vencidos durante operaciones posteriores.
+- Motivo: limitar retención y crecimiento persistente sin perder serialización transaccional.
+- Consecuencia: la infraestructura futura podrá añadir una purga programada.
+
+## D-037 — Auditoría restringida del rehash
+
+- Fecha: 2026-07-24
+- Estado: CORRECCIÓN DE REAUDITORÍA; PENDIENTE DE APROBACIÓN HUMANA
+- Decisión: registrar cambios de key ID en una tabla restringida, sin Event Log, Outbox ni
+  conservación del hash anterior.
+- Motivo: el rehash es mantenimiento de seguridad, no una mutación de la voluntad del
+  participante, pero requiere trazabilidad operativa.
+- Consecuencia: la auditoría puede reconstruir rotaciones sin ampliar la retención pseudónima.

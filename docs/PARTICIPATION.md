@@ -48,18 +48,27 @@ Los hashes se separan por dominio para impedir correlaciones accidentales.
 
 ### Rotación
 
-1. Añadir una clave nueva al principio del keyring.
-2. Mantener todas las claves anteriores como lookup-only.
-3. Desplegar el mismo keyring en todas las instancias.
-4. Escribir nuevos apoyos con la primaria y su `subject_key_id`.
-5. Detectar duplicados y revocaciones con todas las claves activas.
-6. Migrar perezosamente un apoyo antiguo cuando vuelve a interactuar.
+1. Desplegar primero soporte de keyring con la clave vigente como único elemento.
+2. Añadir una clave nueva al principio del keyring.
+3. Mantener todas las claves anteriores como lookup-only.
+4. Desplegar el mismo keyring en todas las instancias.
+5. Escribir nuevos apoyos con la primaria y su `subject_key_id`.
+6. Detectar duplicados y revocaciones con todas las claves activas.
+7. Migrar perezosamente un apoyo antiguo cuando vuelve a interactuar.
+8. Verificar que no quedan apoyos activos asociados antes de retirar una clave.
 
 La clave más antigua permanece como clave estable de locking/rate limiting durante el rolling
-deploy. Así, instancias antiguas y nuevas serializan al mismo sujeto. Una clave no puede
-retirarse mientras existan apoyos con su `subject_key_id`; esa condición es consultable. Si
-una clave se compromete, la retirada exige revocar o reidentificar esas filas mediante un
-procedimiento extraordinario.
+deploy. Así, instancias antiguas y nuevas serializan al mismo sujeto. `assertReady()` bloquea
+la activación y cada operación si falta cualquier `subject_key_id` usado por apoyos activos.
+La retirada solo es válida cuando esa comprobación pasa. Si una clave se compromete, exige
+revocar o reidentificar esas filas mediante un procedimiento extraordinario.
+
+Cada rehash queda registrado en `participation_identity_migrations` con el Support y los IDs
+de clave anterior/nueva. No genera evento de dominio ni Outbox porque no cambia la decisión
+del participante ni el contador; es mantenimiento de seguridad con auditoría restringida.
+
+Los locks pseudónimos se crean únicamente después de validar la Proposal, expiran tras 24
+horas de inactividad y se purgan durante operaciones posteriores.
 
 ## Añadir apoyo
 

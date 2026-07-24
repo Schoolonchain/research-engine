@@ -9,6 +9,7 @@ import {
 } from "../events/event-store.js";
 import {
   DuplicateSupportError,
+  ParticipationConfigurationError,
   ParticipationContentionError,
   ParticipationConflictError,
   SupportNotFoundError,
@@ -37,6 +38,10 @@ interface SupportRow {
 
 interface ExistingSupportRow extends SupportRow {
   readonly subject_key_hash: string;
+  readonly subject_key_id: string;
+}
+
+interface MissingKeyRow {
   readonly subject_key_id: string;
 }
 
@@ -114,6 +119,7 @@ export class SupportService {
     identity: ParticipationIdentity,
     proposalPublicId: string,
   ): Promise<SupportResult> {
+    await this.assertReady();
     const keys = this.keys.derive(identity);
     await this.limiter.consume("support_add", keys);
     if (await this.normalizeExistingSupport(proposalPublicId, keys)) {
@@ -210,6 +216,7 @@ export class SupportService {
     identity: ParticipationIdentity,
     proposalPublicId: string,
   ): Promise<SupportResult> {
+    await this.assertReady();
     const keys = this.keys.derive(identity);
     await this.limiter.consume("support_revoke", keys);
 
@@ -282,13 +289,46 @@ export class SupportService {
   ): Promise<void> {
     await transaction.query(
       `
-        INSERT INTO participation_subject_locks (key_hash)
-        VALUES ($1)
+        DELETE FROM participation_subject_locks
+        WHERE expires_at < CURRENT_TIMESTAMP
+      `,
+    );
+    await transaction.query(
+      `
+        INSERT INTO participation_subject_locks (key_hash, expires_at)
+        VALUES ($1, CURRENT_TIMESTAMP + interval '24 hours')
         ON CONFLICT (key_hash)
-        DO UPDATE SET last_used_at = CURRENT_TIMESTAMP
+        DO UPDATE SET
+          last_used_at = CURRENT_TIMESTAMP,
+          expires_at = CURRENT_TIMESTAMP + interval '24 hours'
       `,
       [stableKeyHash],
     );
+  }
+
+  public async assertReady(): Promise<void> {
+    const configuredIds = this.keys.keyIds();
+    const placeholders = hashPlaceholders(1, configuredIds.length);
+    const missing = await this.database.transaction((transaction) =>
+      transaction.query<MissingKeyRow>(
+        `
+          SELECT DISTINCT subject_key_id
+          FROM supports
+          WHERE
+            status = 'ACTIVE'
+            AND subject_key_id NOT IN (${placeholders})
+          ORDER BY subject_key_id
+        `,
+        configuredIds,
+      ),
+    );
+    if (missing.rows.length > 0) {
+      throw new ParticipationConfigurationError(
+        `Participation keyring is missing active key IDs: ${missing.rows
+          .map((row) => row.subject_key_id)
+          .join(", ")}`,
+      );
+    }
   }
 
   private normalizeExistingSupport(
@@ -296,6 +336,7 @@ export class SupportService {
     keys: ReturnType<ParticipationKeyDeriver["derive"]>,
   ): Promise<boolean> {
     return this.database.transaction(async (transaction) => {
+      await proposalForSupport(transaction, proposalPublicId);
       await this.lockSubject(transaction, keys.rateSubjectKeyHash);
       const candidates = hashPlaceholders(
         2,
@@ -334,6 +375,17 @@ export class SupportService {
           `,
           [keys.subjectKeyHash, keys.subjectKeyId, existing.id],
         );
+        if (existing.subject_key_id !== keys.subjectKeyId) {
+          await transaction.query(
+            `
+              INSERT INTO participation_identity_migrations (
+                support_id, from_key_id, to_key_id
+              )
+              VALUES ($1, $2, $3)
+            `,
+            [existing.id, existing.subject_key_id, keys.subjectKeyId],
+          );
+        }
       }
       return true;
     });

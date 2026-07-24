@@ -46,3 +46,10 @@ export class ParticipationContentionError extends Error {
     this.name = "ParticipationContentionError";
   }
 }
+
+export class ParticipationConfigurationError extends Error {
+  public constructor(message: string) {
+    super(message);
+    this.name = "ParticipationConfigurationError";
+  }
+}

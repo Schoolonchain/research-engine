@@ -81,6 +81,10 @@ export class ParticipationKeyDeriver {
     });
   }
 
+  public keyIds(): readonly string[] {
+    return Object.freeze(this.versions.map((version) => version.id));
+  }
+
   private hash(key: string, scope: string, value: string): string {
     return createHmac("sha256", key)
       .update(`participation:v1:${scope}:`)

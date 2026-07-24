@@ -12,6 +12,8 @@ import { loadMigrations, migrate } from "../src/db/migrations.js";
 import { buildParticipationApi } from "../src/participation/api.js";
 import {
   DuplicateSupportError,
+  ParticipationConfigurationError,
+  ParticipationConflictError,
   ParticipationContentionError,
   ParticipationRateLimitError,
   SupportNotFoundError,
@@ -306,6 +308,90 @@ describe("Participation supports and anti-abuse", () => {
       { status: "ACTIVE", subject_key_id: "rotation-v2" },
     ]);
     expect(rows.rows.filter((row) => row.status === "REVOKED")).toHaveLength(1);
+
+    const migrations = await database.query<{
+      from_key_id: string;
+      to_key_id: string;
+    }>(
+      `
+        SELECT from_key_id, to_key_id
+        FROM participation_identity_migrations
+      `,
+    );
+    expect(migrations.rows).toEqual([
+      { from_key_id: "legacy-v1", to_key_id: "rotation-v2" },
+    ]);
+  });
+
+  it("blocks premature retirement of a key used by active supports", async () => {
+    const proposal = await openProposal("Premature key retirement");
+    const participant = identity("retirement-stable-subject");
+    await supportService.add(participant, proposal.publicId);
+
+    const missingLegacyKey = new SupportService(transactionalDatabase, [
+      {
+        id: "rotation-v2",
+        key: "new-test-participation-key-32-bytes-minimum",
+      },
+    ]);
+
+    await expect(missingLegacyKey.assertReady()).rejects.toThrow(
+      "legacy-v1",
+    );
+    await expect(
+      missingLegacyKey.add(participant, proposal.publicId),
+    ).rejects.toBeInstanceOf(ParticipationConfigurationError);
+
+    const state = await database.query<{
+      support_count: number;
+      active_rows: number;
+    }>(`
+      SELECT
+        (SELECT support_count FROM proposals) AS support_count,
+        (
+          SELECT count(*)::int FROM supports WHERE status = 'ACTIVE'
+        ) AS active_rows
+    `);
+    expect(state.rows[0]).toEqual({ support_count: 1, active_rows: 1 });
+  });
+
+  it("does not retain a subject lock for an unavailable proposal", async () => {
+    await expect(
+      supportService.add(identity("invalid-proposal-subject"), randomUUID()),
+    ).rejects.toBeInstanceOf(ParticipationConflictError);
+
+    const locks = await database.query<{ count: number }>(
+      "SELECT count(*)::int AS count FROM participation_subject_locks",
+    );
+    expect(locks.rows[0]?.count).toBe(0);
+  });
+
+  it("purges expired subject locks during participation", async () => {
+    await database.query(
+      `
+        INSERT INTO participation_subject_locks (
+          key_hash, created_at, last_used_at, expires_at
+        )
+        VALUES (
+          $1,
+          CURRENT_TIMESTAMP - interval '2 days',
+          CURRENT_TIMESTAMP - interval '2 days',
+          CURRENT_TIMESTAMP - interval '1 day'
+        )
+      `,
+      ["f".repeat(64)],
+    );
+    const proposal = await openProposal("Expired lock cleanup");
+    await supportService.add(identity("cleanup-subject"), proposal.publicId);
+
+    const expired = await database.query<{ count: number }>(
+      `
+        SELECT count(*)::int AS count
+        FROM participation_subject_locks
+        WHERE expires_at < CURRENT_TIMESTAMP
+      `,
+    );
+    expect(expired.rows[0]?.count).toBe(0);
   });
 
   it("keeps rate-limit counters auditable across policy versions", async () => {

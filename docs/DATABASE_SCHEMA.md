@@ -6,6 +6,7 @@ Fuentes ejecutables:
 - `migrations/0002_events_outbox.sql`
 - `migrations/0003_participation_controls.sql`
 - `migrations/0004_participation_key_rotation.sql`
+- `migrations/0005_participation_key_safety.sql`
 
 ## Agregados principales
 
@@ -96,7 +97,7 @@ CONFLICTING_EVIDENCE y CITATIONS separados en documentos JSON.
 
 Los tests ejecutan la migración sobre PostgreSQL embebido y comprueban:
 
-1. creación de las veinte tablas previstas;
+1. creación de las veintiuna tablas previstas;
 2. segunda ejecución idempotente;
 3. relaciones separadas Source–Claim–Evidence;
 4. rechazo de apoyos activos duplicados;
@@ -140,8 +141,14 @@ cambio de política no reutilice contadores creados bajo parámetros anteriores.
 
 Bloqueo lógico estable por sujeto, derivado con la clave más antigua aún activa del keyring.
 Serializa altas, revocaciones y migraciones perezosas durante la rotación sin almacenar
-identidad directa. La clave antigua solo puede retirarse cuando no queden apoyos activos ni
-ventanas vigentes que dependan de ella.
+identidad directa. Cada fila expira tras 24 horas de inactividad y las operaciones eliminan
+locks vencidos. No se crea un lock hasta haber validado que la Proposal existe y admite apoyo.
+
+### participation_identity_migrations
+
+Registro restringido de los cambios de `subject_key_id` efectuados por la migración perezosa.
+Conserva el Support afectado, IDs de clave anterior/nueva y timestamp, pero no guarda hashes
+anteriores ni identidad directa.
 
 ### abuse_signals
 

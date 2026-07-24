@@ -1,7 +1,7 @@
 # Respuesta a auditoría — Fase 4
 
 Fecha: 2026-07-24  
-Estado: correcciones implementadas; pendiente de nueva auditoría
+Estado: segunda ronda de correcciones implementada; pendiente de nueva auditoría
 
 ## H-001 — Rotación HMAC
 
@@ -13,7 +13,8 @@ Estado: correcciones implementadas; pendiente de nueva auditoría
 - `subject_key_id` persistido en Support.
 - Lock transaccional estable durante rolling deploy.
 - Migración perezosa al detectar un apoyo creado con clave anterior.
-- Retiro bloqueado mientras existan filas asociadas a una clave.
+- `assertReady()` y cada operación bloquean la configuración si falta una clave usada por
+  apoyos activos.
 
 Prueba automatizada:
 
@@ -22,6 +23,27 @@ Prueba automatizada:
 3. comprobar que el mismo sujeto sigue siendo duplicado;
 4. revocar mediante el keyring nuevo;
 5. volver a apoyar y comprobar escritura con `rotation-v2`.
+6. retirar prematuramente `legacy-v1` y comprobar que la activación/operación se bloquea.
+
+El primer despliegue es deliberadamente de dos etapas: primero se publica soporte de keyring
+con la clave vigente; después se introduce una nueva primaria manteniendo la anterior.
+
+## M-004 — Ciclo de vida de locks
+
+**Corregido.**
+
+- La Proposal se valida antes de crear el lock.
+- Los locks expiran tras 24 horas de inactividad.
+- Cada operación purga locks vencidos antes de adquirir el suyo.
+- Un test adversarial confirma que una Proposal inexistente no deja locks.
+
+## M-005 — Trazabilidad de rehash
+
+**Corregido.**
+
+La tabla `participation_identity_migrations` registra Support, clave anterior, clave nueva y
+timestamp. Se excluye Event Log/Outbox porque el rehash no altera el apoyo ni el contador;
+la operación de seguridad conserva una auditoría restringida sin retener el hash anterior.
 
 ## M-001 — Versionado de rate limits
 
@@ -57,7 +79,7 @@ desplegable.
 
 ## Verificaciones disponibles
 
-- Suite local: 5 archivos, 41 tests.
+- Suite local: pendiente de repetición tras esta segunda ronda correctiva.
 - TypeScript estricto.
 - Build Node.js 24.
 - CI de PR #4 fue verificada previamente como aprobada; deberá ejecutarse nuevamente con el
@@ -66,7 +88,6 @@ desplegable.
 ## Pendientes no bloqueantes registrados
 
 - prueba adicional contra PostgreSQL externo/real;
-- purga operativa de filas expiradas;
+- purga operativa de rate limits y señales expiradas;
 - proveedor real de identidad/CAPTCHA;
 - auditoría de dependencias si se autoriza el envío de metadatos al registro.
-
