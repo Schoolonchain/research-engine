@@ -119,6 +119,8 @@ Orden explícita requerida: **“Fase 2 aprobada. Integra la PR y comienza con l
 
 ## Fase 3 — Propuestas
 
+**Estado: COMPLETADA LOCALMENTE EL 2026-07-24; pendiente de checkpoint humano.**
+
 ### Objetivo
 
 Permitir crear, consultar, modificar, archivar y solicitar eliminación con permisos.
@@ -138,6 +140,22 @@ Permitir crear, consultar, modificar, archivar y solicitar eliminación con perm
 ### Criterio de éxito
 
 Flujo de propuestas seguro, auditable e independiente de Notion.
+
+### Resultado verificado
+
+- Servicio transaccional para crear, consultar, listar, modificar, abrir, archivar y borrar.
+- API Fastify con identidad verificada mediante adaptador inyectable.
+- Permisos de autor y moderación sin confiar en IDs del cliente.
+- Concurrencia optimista coordinada con secuencia de eventos.
+- Borrado lógico con redacción y protección del historial de investigación.
+- Eventos minimizados sin copiar contenido aportado.
+- 28 tests pasan; typecheck y build pasan.
+- Crear Proposal no crea Authorization ni ResearchJob.
+- UI editable diferida hasta identidad real para no introducir autenticación simulada.
+
+### Gate
+
+Orden explícita requerida: **“Fase 3 aprobada. Integra la PR y comienza con la Fase 4.”**
 
 ## Fase 4 — Participación y apoyos
 

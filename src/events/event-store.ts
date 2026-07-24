@@ -129,6 +129,24 @@ export class EventStore {
     });
   }
 
+  public async transactPrepared<Result>(
+    prepare: (
+      transaction: DatabaseExecutor,
+    ) => Promise<AppendEventCommand>,
+    mutateState: (
+      transaction: DatabaseExecutor,
+      command: AppendEventCommand,
+    ) => Promise<Result>,
+  ): Promise<{ readonly result: Result; readonly event: StoredEvent }> {
+    return this.database.transaction(async (transaction) => {
+      const command = await prepare(transaction);
+      validateCommand(command);
+      const result = await mutateState(transaction, command);
+      const event = await this.append(transaction, command);
+      return Object.freeze({ result, event });
+    });
+  }
+
   private async append(
     transaction: DatabaseExecutor,
     command: AppendEventCommand,
