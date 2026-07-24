@@ -266,10 +266,13 @@ describe("SSRF-resistant source fetch policy", () => {
     "198.18.0.1",
     "240.0.0.1",
     "2001:db8::1",
+    "2001::1",
+    "2001:10::1",
     "fec0::1",
     "64:ff9b:1::a00:1",
     "2002:7f00:1::",
     "4000::1",
+    "3fff::1",
   ])("rejects non-global address %s", async (address) => {
     const fetcher = new SafeSourceFetcher(
       { resolve: async () => [address] },
@@ -284,6 +287,26 @@ describe("SSRF-resistant source fetch policy", () => {
       { request: async () => ({ status: 200, contentType: "text/plain", body: new Uint8Array() }) },
     );
     await expect(fetcher.fetch("https://example.com")).rejects.toBeInstanceOf(UnsafeSourceError);
+  });
+
+  it("rejects missing or unknown rate-policy actions", () => {
+    const database = {} as ConstructorParameters<typeof KnowledgeService>[0];
+    expect(() => new KnowledgeService(database, {
+      version: 1,
+      windowSeconds: 60,
+      retentionSeconds: 600,
+      actorLimits: { source_add: 1, claim_add: 1 } as never,
+      globalLimit: 10,
+    })).toThrow("define exactly");
+    expect(() => new KnowledgeService(database, {
+      version: 1,
+      windowSeconds: 60,
+      retentionSeconds: 600,
+      actorLimits: {
+        source_add: 1, claim_add: 1, evidence_add: 1, unexpected: 1,
+      } as never,
+      globalLimit: 10,
+    })).toThrow("define exactly");
   });
 
   it.each(["8.8.8.8", "93.184.216.34", "2606:4700:4700::1111"])(

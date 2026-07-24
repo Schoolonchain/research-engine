@@ -1,6 +1,6 @@
 # Respuesta a auditoría — Fase 5
 
-Estado: segunda ronda de correcciones implementada; pendiente de reauditoría.
+Estado: tercera ronda de correcciones implementada; pendiente de reauditoría.
 
 ## Hallazgos bloqueantes
 
@@ -35,3 +35,12 @@ No se añadió IA, ResearchJob, pagos, score ni integración con Knowledge Hub.
 - Purga acotada de hasta 1.000 contadores expirados por operación, respaldada por índice.
 - Política de cuotas validada como enteros positivos y retención mayor o igual a ventana.
 - `proposal_id` es inmutable en Source y Claim mediante migración nueva.
+
+## Tercera ronda
+
+- Política IPv6 fail-closed ampliada con exclusión de `2001::/23` y `3fff::/20`, además de
+  mapped, transición, documentación y espacios fuera de global unicast.
+- Casos adversariales para TEREDO, ORCHID/zona especial `2001::/23` y documentación `3fff`.
+- Las pruebas verifican que el transporte recibe cero invocaciones para estos destinos.
+- La política de cuotas exige exactamente `source_add`, `claim_add` y `evidence_add`; rechaza
+  acciones ausentes o desconocidas al construir el servicio.

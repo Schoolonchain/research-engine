@@ -15,7 +15,10 @@ const GLOBAL_V6 = new BlockList();
 GLOBAL_V6.addSubnet("2000::", 3, "ipv6");
 const NON_GLOBAL_V6 = new BlockList();
 for (const [network, prefix] of [
-  ["2001:2::", 48], ["2001:db8::", 32], ["2002::", 16],
+  ["2001::", 23],
+  ["2001:db8::", 32],
+  ["2002::", 16],
+  ["3fff::", 20],
 ] as const) NON_GLOBAL_V6.addSubnet(network, prefix, "ipv6");
 
 function defaultPort(protocol: string): string {

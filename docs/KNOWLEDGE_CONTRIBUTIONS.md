@@ -29,6 +29,8 @@ canónica es única dentro de cada Proposal.
 petición, incluida cada redirección, canonicaliza, resuelve DNS y rechaza direcciones privadas,
 loopback, link-local, multicast o inválidas. El transporte recibe las direcciones aprobadas,
 timeout y límite de bytes; deberá fijar la conexión a una de ellas para impedir DNS rebinding.
+IPv6 se trata de forma fail-closed: solo global unicast y con exclusiones versionadas para
+espacios especiales IANA, documentación y mecanismos de transición.
 
 Se permiten HTML, texto, JSON y PDF, hasta 1 MB y tres redirecciones. El transporte de
 producción queda bloqueado hasta una auditoría específica que demuestre conexión fijada a la

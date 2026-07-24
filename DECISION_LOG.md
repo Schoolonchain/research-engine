@@ -387,3 +387,11 @@ propuesta no se considera aprobada hasta recibir confirmación humana.
 - Estado: CORRECCIÓN DE REAUDITORÍA; PENDIENTE DE APROBACIÓN HUMANA DE FASE 5
 - Decisión: impedir cambios posteriores de `proposal_id` en Source y Claim.
 - Motivo: preservar permanentemente la integridad consumida por Evidence y futuros scores.
+
+## D-046 — Exclusiones IPv6 especiales versionadas
+
+- Fecha: 2026-07-24
+- Estado: CORRECCIÓN DE REAUDITORÍA; PENDIENTE DE APROBACIÓN HUMANA DE FASE 5
+- Decisión: mantener allowlist global unicast con exclusiones explícitas basadas en el
+  registro especial de IANA, incluyendo `2001::/23` y `3fff::/20`.
+- Motivo: pertenecer a `2000::/3` no implica por sí solo enrutabilidad global.

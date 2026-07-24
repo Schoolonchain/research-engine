@@ -30,6 +30,16 @@ export class KnowledgeRateLimiter {
     private readonly database: TransactionalDatabase,
     private readonly policy = DEFAULT_KNOWLEDGE_RATE_POLICY,
   ) {
+    const requiredActions = ["claim_add", "evidence_add", "source_add"];
+    const configuredActions = Object.keys(policy.actorLimits).sort();
+    if (
+      configuredActions.length !== requiredActions.length ||
+      configuredActions.some((action, index) => action !== requiredActions[index])
+    ) {
+      throw new Error(
+        "Knowledge rate policy must define exactly source_add, claim_add and evidence_add",
+      );
+    }
     const values = [
       policy.version,
       policy.windowSeconds,

@@ -229,7 +229,7 @@ Relaciones trazables, entrada renderizada de forma segura y fetcher resistente a
 - Fetcher aislado con revalidación DNS por salto y límites de MIME, bytes y timeout.
 - API autenticada sin confiar en identidad del body.
 - Eventos minimizados y Outbox atómico.
-- 71 tests pasan; typecheck y build pasan.
+- 75 tests pasan; typecheck y build pasan.
 - Ninguna contribución crea Authorization, ResearchJob ni ejecuta IA.
 
 ### Gate
