@@ -146,3 +146,43 @@ propuesta no se considera aprobada hasta recibir confirmación humana.
 - Decisión: modelar límites y relaciones ahora, sin crear servicio, cola ni worker.
 - Motivo: continuidad del esquema sin violar el gate de Fase 8.
 - Consecuencia: ninguna acción puede crear o ejecutar trabajos en Fase 1.
+
+## D-017 — Secuencia estricta por agregado, no global
+
+- Fecha: 2026-07-24
+- Estado: ACEPTADA EN FASE 2
+- Decisión: mantener `current_sequence` por tipo e ID de agregado.
+- Motivo: garantiza orden útil y control de concurrencia sin serializar todo el sistema.
+- Consecuencia: correlación y timestamps unen procesos entre agregados; no existe orden total.
+
+## D-018 — Event Log protegido mediante triggers
+
+- Fecha: 2026-07-24
+- Estado: ACEPTADA EN FASE 2
+- Decisión: PostgreSQL rechaza `UPDATE` y `DELETE` sobre `domain_events`.
+- Motivo: la inmutabilidad no debe depender solo de disciplina en el código.
+- Consecuencia: las correcciones se representarán con eventos compensatorios.
+
+## D-019 — Outbox referencia el evento sin copiar payload
+
+- Fecha: 2026-07-24
+- Estado: ACEPTADA EN FASE 2
+- Decisión: `outbox_messages` almacena `event_id`, topic y estado de entrega.
+- Motivo: evitar duplicación de datos sensibles y divergencia entre evento y mensaje.
+- Consecuencia: el publicador debe resolver el evento dentro de su flujo de entrega.
+
+## D-020 — Idempotencia mediante recibo transaccional
+
+- Fecha: 2026-07-24
+- Estado: ACEPTADA EN FASE 2
+- Decisión: cada consumidor registra `(consumer_name, event_id)` junto a su efecto.
+- Motivo: Outbox ofrece entrega al menos una vez; el efecto debe tolerar reentregas.
+- Consecuencia: handlers de consumidor deben usar el executor transaccional proporcionado.
+
+## D-021 — Payload de eventos con minimización defensiva
+
+- Fecha: 2026-07-24
+- Estado: ACEPTADA EN FASE 2
+- Decisión: máximo 64 KiB y denegación de claves de secretos/identificadores directos.
+- Motivo: el historial es duradero y no debe convertirse en almacén de credenciales o PII.
+- Consecuencia: cada fase funcional añadirá esquemas allowlist específicos por evento.

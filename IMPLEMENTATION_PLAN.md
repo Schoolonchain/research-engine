@@ -78,6 +78,8 @@ Orden explícita requerida: **“Fase 1 aprobada. Comienza con la Fase 2.”**
 
 ## Fase 2 — Eventos, auditoría y outbox
 
+**Estado: COMPLETADA LOCALMENTE EL 2026-07-24; pendiente de checkpoint humano.**
+
 ### Objetivo
 
 Preservar historial y entrega fiable sin event sourcing puro.
@@ -98,6 +100,22 @@ Preservar historial y entrega fiable sin event sourcing puro.
 ### Criterio de éxito
 
 Cada mutación crítica queda trazada y la aplicación sigue consultando estado materializado.
+
+### Resultado verificado
+
+- Event envelope y secuencia estricta por agregado.
+- Estado + evento + Outbox en una transacción.
+- Event Log protegido contra `UPDATE` y `DELETE`.
+- Payload limitado y filtrado contra secretos e identificadores directos.
+- Outbox con leases, recuperación, publicación y reintento.
+- Consumidores idempotentes con recibo transaccional.
+- Proyección mínima para probar reentrega sin efectos dobles.
+- 20 tests pasan; typecheck y build pasan.
+- Sin endpoints, workers operativos ni funciones de Fase 3.
+
+### Gate
+
+Orden explícita requerida: **“Fase 2 aprobada. Integra la PR y comienza con la Fase 3.”**
 
 ## Fase 3 — Propuestas
 

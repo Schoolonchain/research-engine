@@ -6,7 +6,7 @@ Knowledge Hub.
 
 ## Estado
 
-**Fase 1 — Fundación y modelo de datos.**
+**Fase 2 — Eventos, auditoría y Outbox.**
 
 Este repositorio todavía no expone endpoints ni ejecuta investigación. La presencia de las
 tablas `authorizations` y `research_jobs` no habilita ningún flujo operativo.
@@ -63,6 +63,7 @@ nueva migración.
 
 - [Arquitectura](ARCHITECTURE.md)
 - [Modelo de datos](docs/DATABASE_SCHEMA.md)
+- [Eventos y Outbox](docs/EVENTS.md)
 - [Plan de implementación](IMPLEMENTATION_PLAN.md)
 - [Registro de decisiones](DECISION_LOG.md)
 
@@ -72,5 +73,6 @@ nueva migración.
 - Notion no es dependencia del dominio.
 - Umbral o score no equivalen a autorización.
 - No existe aún un servicio capaz de crear o ejecutar Research Jobs.
+- El Event Log y Outbox no incluyen un worker operativo.
 - No se versionan secretos.
 
