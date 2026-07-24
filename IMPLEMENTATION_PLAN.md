@@ -159,6 +159,8 @@ Orden explícita requerida: **“Fase 3 aprobada. Integra la PR y comienza con l
 
 ## Fase 4 — Participación y apoyos
 
+**Estado: CORRECCIONES DE AUDITORÍA IMPLEMENTADAS EL 2026-07-24; pendiente de reauditoría y checkpoint humano.**
+
 ### Objetivo
 
 Añadir apoyo evolucionable y resistente a duplicación/abuso.
@@ -178,6 +180,22 @@ Añadir apoyo evolucionable y resistente a duplicación/abuso.
 ### Criterio de éxito
 
 Contadores consistentes y fraude limitado sin recopilar identidad innecesaria.
+
+### Resultado verificado
+
+- Añadir y revocar apoyos con historial y contador materializado.
+- Identidad estable resuelta por servidor y pseudonimizada con HMAC.
+- Duplicados protegidos por índice parcial y transacción.
+- Reintentos acotados ante concurrencia optimista.
+- Límites versionables por sujeto, señal de red y globales.
+- Señales de abuso minimizadas con expiración.
+- Honeypot neutro; CAPTCHA adaptable desde el resolver de identidad.
+- 46 tests pasan; typecheck y build pasan.
+- Apoyar o revocar no crea Authorization ni ResearchJob.
+
+### Gate
+
+Orden explícita requerida: **“Fase 4 aprobada. Integra la PR y comienza con la Fase 5.”**
 
 ## Fase 5 — Fuentes, afirmaciones y evidencias
 

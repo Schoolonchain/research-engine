@@ -1,9 +1,14 @@
-# Modelo de datos — Fase 1
+# Modelo de datos — Fases 1–4
 
 Fuentes ejecutables:
 
 - `migrations/0001_initial_domain.sql`
 - `migrations/0002_events_outbox.sql`
+- `migrations/0003_participation_controls.sql`
+- `migrations/0004_participation_key_rotation.sql`
+- `migrations/0005_participation_key_safety.sql`
+- `migrations/0006_participation_key_registry.sql`
+- `migrations/0007_participation_key_backfill_index.sql`
 
 ## Agregados principales
 
@@ -62,8 +67,10 @@ localizador, fragmento y evaluaciones separadas.
 ### supports
 
 Participación sobre una Proposal. `subject_key_hash` es una clave pseudónima derivada por una
-política futura; no supone que una IP sea una persona. Un índice parcial impide dos apoyos
-activos para la misma propuesta y sujeto.
+clave HMAC identificada por `subject_key_id`; no supone que una IP sea una persona. Un índice
+parcial impide dos apoyos activos para la misma propuesta y sujeto. Durante una rotación, el
+servicio compara todas las versiones activas del keyring y migra perezosamente el apoyo a la
+clave primaria.
 
 ### score_policies y scores
 
@@ -92,7 +99,7 @@ CONFLICTING_EVIDENCE y CITATIONS separados en documentos JSON.
 
 Los tests ejecutan la migración sobre PostgreSQL embebido y comprueban:
 
-1. creación de las diecisiete tablas previstas;
+1. creación de las veintidós tablas previstas;
 2. segunda ejecución idempotente;
 3. relaciones separadas Source–Claim–Evidence;
 4. rechazo de apoyos activos duplicados;
@@ -126,10 +133,41 @@ Clave única consumidor/evento para hacer idempotente el efecto de cada consumid
 
 Proyección mínima usada para demostrar reentrega segura y orden de procesamiento.
 
+### participation_rate_limits
+
+Contadores por ventana y scope `SUBJECT`, `NETWORK` o `GLOBAL`. Solo conserva claves HMAC,
+límite aplicado y expiración. `policy_version` forma parte de la clave primaria para que un
+cambio de política no reutilice contadores creados bajo parámetros anteriores.
+
+### participation_subject_locks
+
+Bloqueo lógico estable por sujeto, derivado con la clave más antigua aún activa del keyring.
+Serializa altas, revocaciones y migraciones perezosas durante la rotación sin almacenar
+identidad directa. Cada fila expira tras 24 horas de inactividad y las operaciones eliminan
+locks vencidos. No se crea un lock hasta haber validado que la Proposal existe y admite apoyo.
+
+### participation_identity_migrations
+
+Registro restringido de los cambios de `subject_key_id` efectuados por la migración perezosa.
+Conserva el Support afectado, IDs de clave anterior/nueva y timestamp, pero no guarda hashes
+anteriores ni identidad directa.
+
+### participation_key_registry
+
+Vincula de forma inmutable cada `key_id` con un verificador HMAC del material criptográfico y
+mantiene `active_support_count` mediante trigger. El readiness consulta este registro acotado,
+no la colección completa de apoyos. El verificador permite detectar reutilización accidental
+del ID sin persistir el secreto. El índice parcial `supports_active_subject_key_id_idx` limita
+el coste del backfill único de una clave todavía no registrada.
+
+### abuse_signals
+
+Señales minimizadas y temporales generadas al exceder límites. No almacena IP, sujeto ni
+identidad directa.
+
 ## Límites deliberados
 
 - Servicios de Proposal pertenecen a Fase 3.
-- Cálculo de identidad antiabuso pertenece a Fase 4.
 - Obtención segura de URLs pertenece a Fase 5.
 - Cálculo de score pertenece a Fase 6.
 - Autenticación administrativa pertenece a Fase 7.

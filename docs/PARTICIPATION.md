@@ -1,0 +1,183 @@
+# Participación y apoyos — Fase 4
+
+## Principios
+
+- Un apoyo representa un sujeto de participación estable, no una dirección IP.
+- Una red puede contener muchas personas y una persona puede cambiar de red.
+- La identidad y las señales antiabuso permanecen separadas.
+- Apoyar o revocar nunca crea Authorization, ResearchJob ni ejecución de IA.
+- Todo cambio de contador queda coordinado con Event Log y Outbox.
+
+## Resolución de identidad
+
+La API recibe `ParticipationIdentity` desde un resolver confiable e inyectado:
+
+```ts
+interface ParticipationIdentity {
+  subjectId: string;
+  actorId?: string;
+  networkSignal?: string;
+}
+```
+
+- `subjectId` es estable y opaco.
+- `actorId` enlaza opcionalmente una cuenta autenticada.
+- `networkSignal` es opcional y solo complementa el análisis.
+- Ninguno se acepta desde body, query ni cabeceras arbitrarias dentro del módulo.
+
+El resolver futuro puede exigir CAPTCHA adaptativo antes de devolver una identidad. Fase 4 no
+elige proveedor de CAPTCHA ni conserva su token.
+
+## Pseudonimización
+
+Antes de persistir, las señales se derivan con HMAC-SHA-256 y una clave de servidor:
+
+```text
+HMAC(secret, "participation:v1:subject:" + stableSubject)
+HMAC(secret, "participation:v1:network:" + networkSignal)
+```
+
+El keyring:
+
+- contiene objetos `{id, key}` ordenados de nueva primaria a claves anteriores;
+- exige al menos 32 caracteres por clave e IDs únicos;
+- se carga mediante `PARTICIPATION_HMAC_KEYS`;
+- no se versiona y debe almacenarse en un gestor de secretos.
+
+Los hashes se separan por dominio para impedir correlaciones accidentales.
+
+### Rotación
+
+1. Desplegar primero soporte de keyring con la clave vigente como único elemento.
+2. Añadir una clave nueva al principio del keyring.
+3. Mantener todas las claves anteriores como lookup-only.
+4. Desplegar el mismo keyring en todas las instancias.
+5. Escribir nuevos apoyos con la primaria y su `subject_key_id`.
+6. Detectar duplicados y revocaciones con todas las claves activas.
+7. Migrar perezosamente un apoyo antiguo cuando vuelve a interactuar.
+8. Verificar que no quedan apoyos activos asociados antes de retirar una clave.
+
+La clave más antigua permanece como clave estable de locking/rate limiting durante el rolling
+deploy. Así, instancias antiguas y nuevas serializan al mismo sujeto. `assertReady()` bloquea
+la activación y cada operación si falta cualquier `subject_key_id` usado por apoyos activos.
+La retirada solo es válida cuando esa comprobación pasa. Si una clave se compromete, exige
+revocar o reidentificar esas filas mediante un procedimiento extraordinario.
+
+`participation_key_registry` vincula cada ID con un verificador HMAC determinista. Reutilizar
+el mismo ID con un secreto distinto bloquea readiness y operaciones. Un trigger mantiene el
+número de apoyos activos por clave; por ello el guard consulta como máximo el registro de
+claves configuradas/registradas y no escanea todos los apoyos en cada solicitud. El primer
+readiness posterior a la migración registra cada clave existente y calcula una sola vez su
+contador inicial mediante un índice parcial. Las comprobaciones posteriores consultan primero
+el registro y no vuelven a leer `supports`.
+
+Cada rehash queda registrado en `participation_identity_migrations` con el Support y los IDs
+de clave anterior/nueva. No genera evento de dominio ni Outbox porque no cambia la decisión
+del participante ni el contador; es mantenimiento de seguridad con auditoría restringida.
+
+Los locks pseudónimos se crean únicamente después de validar la Proposal, expiran tras 24
+horas de inactividad y se purgan durante operaciones posteriores.
+
+## Añadir apoyo
+
+Precondiciones:
+
+- identidad resuelta;
+- Proposal en `OPEN` o `COLLECTING`;
+- límites no excedidos;
+- no existe apoyo activo del mismo sujeto.
+
+Transacción:
+
+1. insertar Support activo;
+2. incrementar `support_count` y versión de Proposal;
+3. anexar `support_added`;
+4. crear mensaje Outbox.
+
+La unicidad parcial `(proposal_id, subject_key_hash) WHERE status = ACTIVE` protege contra
+carreras. Un cambio concurrente del agregado se reintenta hasta tres veces.
+
+## Revocar apoyo
+
+El mismo sujeto puede revocar su apoyo activo:
+
+1. Support pasa a `REVOKED`;
+2. contador disminuye sin quedar negativo;
+3. versión de Proposal avanza;
+4. se anexa `support_revoked` y Outbox.
+
+El historial no se sobrescribe. Tras revocar puede crearse un nuevo apoyo.
+
+## Límites antiabuso
+
+Ventanas duraderas e independientes:
+
+- **SUBJECT:** automatización de un sujeto entre muchas propuestas;
+- **NETWORK:** señal agregada, con límite más amplio;
+- **GLOBAL:** protección de capacidad del sistema.
+
+Política inicial:
+
+| Scope | Intentos/minuto |
+|---|---:|
+| Subject | 20 |
+| Network | 120 |
+| Global | 2.000 |
+
+La política es inyectable y versionable. `policy_version` forma parte de la clave primaria del
+contador; un cambio de política abre un contador distinto incluso dentro de la misma ventana.
+Cada fila guarda el límite aplicado y una fecha de expiración. Al superar un límite:
+
+- la operación se rechaza con `429` y `Retry-After`;
+- se registra una señal `RATE_LIMIT_EXCEEDED`;
+- la señal contiene solo hash, scope, riesgo, versión y expiración;
+- el intento bloqueado no crea Support, evento ni ResearchJob.
+
+La expiración define retención; el proceso periódico de purga pertenecerá a la infraestructura
+operativa, todavía inexistente.
+
+## Honeypot
+
+El campo reservado `website` no debe ser rellenado por clientes humanos. Si contiene valor,
+la API responde de forma neutra con `202` y no ejecuta participación. No se expone al cliente
+que se activó la detección.
+
+## API
+
+| Método | Ruta | Función |
+|---|---|---|
+| `POST` | `/proposals/:publicId/supports` | Añadir apoyo |
+| `DELETE` | `/proposals/:publicId/supports/me` | Revocar apoyo |
+
+Respuestas principales:
+
+- `201`: apoyo añadido;
+- `202`: solicitud absorbida por honeypot;
+- `401`: falta identidad de participación;
+- `404`: no existe apoyo activo al revocar;
+- `409`: duplicado o estado incompatible;
+- `429`: límite excedido.
+- `503`: contención temporal tras agotar reintentos; incluye `Retry-After`.
+
+## Garantías verificadas
+
+- apoyo, contador, evento y Outbox atómicos;
+- duplicado rechazado aunque cambie la red;
+- sujetos distintos pueden compartir red;
+- revocación y nuevo apoyo preservan historial;
+- límites y señales persisten tras rechazo;
+- no se guarda sujeto ni señal de red en claro;
+- body no puede suplantar identidad;
+- honeypot no crea apoyo;
+- ningún camino crea ResearchJob.
+- rotación conserva deduplicación y revocación;
+- cambios de política preservan contadores y límites auditables;
+- contención usa backoff y termina en una respuesta reintentable.
+
+## Fuera de alcance
+
+- score y umbral: Fase 6;
+- autenticación administrativa: Fase 7;
+- autorización/ResearchJob: Fase 8;
+- CAPTCHA concreto y servicio de anomalías: decisión de despliegue;
+- IA: Fase 9.

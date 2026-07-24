@@ -6,10 +6,11 @@ Knowledge Hub.
 
 ## Estado
 
-**Fase 3 — Propuestas.**
+**Fase 4 — Participación y apoyos.**
 
-Este repositorio todavía no expone endpoints ni ejecuta investigación. La presencia de las
-tablas `authorizations` y `research_jobs` no habilita ningún flujo operativo.
+El repositorio define constructores Fastify para Proposal y Participation, pero todavía no
+incluye un punto de entrada desplegable ni ejecuta investigación. La presencia de las tablas
+`authorizations` y `research_jobs` no habilita ningún flujo operativo.
 
 ## Requisitos
 
@@ -65,6 +66,7 @@ nueva migración.
 - [Modelo de datos](docs/DATABASE_SCHEMA.md)
 - [Eventos y Outbox](docs/EVENTS.md)
 - [Propuestas y API](docs/PROPOSALS.md)
+- [Participación y antiabuso](docs/PARTICIPATION.md)
 - [Plan de implementación](IMPLEMENTATION_PLAN.md)
 - [Registro de decisiones](DECISION_LOG.md)
 
@@ -76,5 +78,6 @@ nueva migración.
 - No existe aún un servicio capaz de crear o ejecutar Research Jobs.
 - El Event Log y Outbox no incluyen un worker operativo.
 - La API de Proposal requiere un autenticador inyectado y no incluye identidad de producción.
+- Los apoyos usan identidad resuelta por servidor y HMAC; una IP no equivale a una persona.
 - No se versionan secretos.
 
