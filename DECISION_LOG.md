@@ -186,3 +186,37 @@ propuesta no se considera aprobada hasta recibir confirmación humana.
 - Decisión: máximo 64 KiB y denegación de claves de secretos/identificadores directos.
 - Motivo: el historial es duradero y no debe convertirse en almacén de credenciales o PII.
 - Consecuencia: cada fase funcional añadirá esquemas allowlist específicos por evento.
+
+## D-022 — Identidad inyectada en la API de Proposal
+
+- Fecha: 2026-07-24
+- Estado: ACEPTADA EN FASE 3
+- Decisión: la API recibe `ActorContext` únicamente desde un autenticador inyectado.
+- Motivo: no confiar en actor IDs, roles o tokens incluidos en el body/query.
+- Consecuencia: Fase 3 es desplegable solo cuando exista un adaptador de identidad confiable.
+
+## D-023 — UI editable diferida hasta identidad real
+
+- Fecha: 2026-07-24
+- Estado: DECISIÓN LOCAL DE SEGURIDAD EN FASE 3
+- Decisión: no crear una UI que use IDs o tokens de prueba.
+- Motivo: simular permisos en cliente contradiría el modelo de seguridad.
+- Consecuencia: dominio y API quedan completos; la UI no bloquea Fases 4–6 y se retomará al
+  integrar identidad.
+
+## D-024 — Borrado lógico con redacción
+
+- Fecha: 2026-07-24
+- Estado: ACEPTADA EN FASE 3
+- Decisión: `DELETE` marca `DELETED` y reemplaza contenido por marcadores mínimos.
+- Motivo: reconciliar privacidad con integridad referencial y auditoría.
+- Consecuencia: el historial registra la acción sin copiar el contenido eliminado.
+
+## D-025 — Contenido de Proposal fuera del Event Log
+
+- Fecha: 2026-07-24
+- Estado: ACEPTADA EN FASE 3
+- Decisión: eventos registran campos modificados y transiciones, no textos aportados.
+- Motivo: el Event Log es inmutable y puede tener retención prolongada.
+- Consecuencia: el estado actual conserva el contenido; la auditoría demuestra cambios sin
+  conservar versiones textuales completas.

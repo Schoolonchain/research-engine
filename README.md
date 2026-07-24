@@ -6,7 +6,7 @@ Knowledge Hub.
 
 ## Estado
 
-**Fase 2 — Eventos, auditoría y Outbox.**
+**Fase 3 — Propuestas.**
 
 Este repositorio todavía no expone endpoints ni ejecuta investigación. La presencia de las
 tablas `authorizations` y `research_jobs` no habilita ningún flujo operativo.
@@ -64,6 +64,7 @@ nueva migración.
 - [Arquitectura](ARCHITECTURE.md)
 - [Modelo de datos](docs/DATABASE_SCHEMA.md)
 - [Eventos y Outbox](docs/EVENTS.md)
+- [Propuestas y API](docs/PROPOSALS.md)
 - [Plan de implementación](IMPLEMENTATION_PLAN.md)
 - [Registro de decisiones](DECISION_LOG.md)
 
@@ -74,5 +75,6 @@ nueva migración.
 - Umbral o score no equivalen a autorización.
 - No existe aún un servicio capaz de crear o ejecutar Research Jobs.
 - El Event Log y Outbox no incluyen un worker operativo.
+- La API de Proposal requiere un autenticador inyectado y no incluye identidad de producción.
 - No se versionan secretos.
 

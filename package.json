@@ -15,6 +15,7 @@
     "db:migrate": "tsx src/db/cli.ts"
   },
   "dependencies": {
+    "fastify": "^5.6.2",
     "pg": "^8.16.3"
   },
   "devDependencies": {
