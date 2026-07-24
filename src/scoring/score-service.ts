@@ -4,13 +4,14 @@ import type { AppendEventCommand } from "../events/event-store.js";
 import { EventStore } from "../events/event-store.js";
 import type { TransactionalDatabase } from "../db/database.js";
 import type { ScoreDimension, ScorePolicyConfig, ScoreResult } from "./model.js";
-import { validateScorePolicy } from "./policy-manager.js";
+import { scorePolicyFingerprint, validateScorePolicy } from "./policy-manager.js";
 
 interface ActivePolicyRow {
   readonly dimension: ScoreDimension["dimension"];
   readonly version: number;
   readonly eligibility_definition: ScorePolicyConfig;
   readonly definition_hash: string;
+  readonly definition: Readonly<Record<string, unknown>>;
 }
 interface InputsRow {
   readonly id: string;
@@ -62,7 +63,7 @@ export class ScoreService {
     const runId = randomUUID();
     return this.database.transaction(async (outer) => {
       const policies = await outer.query<ActivePolicyRow>(
-        `SELECT dimension, version, eligibility_definition, definition_hash
+        `SELECT dimension, version, definition, eligibility_definition, definition_hash
          FROM score_policies WHERE status = 'ACTIVE' ORDER BY dimension`,
       );
       if (policies.rows.length !== 4) throw new Error("Exactly four active score policies are required");
@@ -73,6 +74,14 @@ export class ScoreService {
       if (policies.rows.some((row) =>
         JSON.stringify(row.eligibility_definition) !== JSON.stringify(policy))) {
         throw new Error("Active eligibility definitions are inconsistent");
+      }
+      for (const active of policies.rows) {
+        if (
+          scorePolicyFingerprint(active.definition, active.eligibility_definition) !==
+          active.definition_hash
+        ) {
+          throw new Error(`Score policy ${active.dimension} fingerprint mismatch`);
+        }
       }
 
       const proposalResult = await outer.query<Omit<InputsRow, keyof CountsRow>>(
@@ -89,13 +98,32 @@ export class ScoreService {
             )::int AS sources,
             count(DISTINCT claim.id) FILTER (
               WHERE claim.moderation_status = 'ACCEPTED'
+                AND (
+                  claim.source_id IS NULL OR EXISTS (
+                    SELECT 1 FROM sources AS claim_source
+                    WHERE claim_source.id = claim.source_id
+                      AND claim_source.moderation_status = 'ACCEPTED'
+                  )
+                )
             )::int AS claims,
             count(DISTINCT evidence.id) FILTER (
               WHERE evidence.moderation_status = 'ACCEPTED'
+                AND claim.moderation_status = 'ACCEPTED'
+                AND EXISTS (
+                  SELECT 1 FROM sources AS evidence_source
+                  WHERE evidence_source.id = evidence.source_id
+                    AND evidence_source.moderation_status = 'ACCEPTED'
+                )
             )::int AS evidence,
             count(DISTINCT evidence.id) FILTER (
               WHERE evidence.moderation_status = 'ACCEPTED'
                 AND evidence.stance = 'CONTRADICTS'
+                AND claim.moderation_status = 'ACCEPTED'
+                AND EXISTS (
+                  SELECT 1 FROM sources AS evidence_source
+                  WHERE evidence_source.id = evidence.source_id
+                    AND evidence_source.moderation_status = 'ACCEPTED'
+                )
             )::int AS contradictions
           FROM proposals AS proposal
           LEFT JOIN sources AS source ON source.proposal_id = proposal.id

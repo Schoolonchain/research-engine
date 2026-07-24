@@ -13,7 +13,12 @@ que sean conocimiento validado. Rejected y Pending quedan excluidas.
 
 Las políticas se registran como DRAFT mediante un servicio interno y se activan
 transaccionalmente, retirando la versión anterior. La definición y los umbrales quedan
-ligados a un fingerprint inmutable.
+ligados a un fingerprint obligatorio, verificado también al consumir. En Fase 6, DRAFT es un
+estado técnico dentro de registro-y-activación atómicos, no una revisión humana separada.
+Cada activación genera evento y Outbox.
+
+Evidence participa únicamente si ella, su Claim y su Source están `ACCEPTED`. Una Claim sin
+Source puede participar por su propio estado. Snapshots y Scores históricos son append-only.
 
 ## Elegibilidad
 

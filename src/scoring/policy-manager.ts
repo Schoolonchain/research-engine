@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 
 import type { TransactionalDatabase } from "../db/database.js";
+import { EventStore } from "../events/event-store.js";
+import { randomUUID } from "node:crypto";
 import type { ScorePolicyConfig } from "./model.js";
 
 const DIMENSIONS = ["PRIORITY", "PROGRESS", "CONFIDENCE", "SUPPORT_COUNT"] as const;
@@ -22,6 +24,15 @@ function canonical(value: unknown): string {
   return JSON.stringify(value);
 }
 
+export function scorePolicyFingerprint(
+  definition: unknown,
+  eligibility: ScorePolicyConfig,
+): string {
+  return createHash("sha256")
+    .update(canonical({ definition, eligibility }))
+    .digest("hex");
+}
+
 export function validateScorePolicy(policy: ScorePolicyConfig): void {
   if (!Number.isSafeInteger(policy.version) || policy.version < 1) {
     throw new Error("Score policy version must be a positive integer");
@@ -41,16 +52,17 @@ export function validateScorePolicy(policy: ScorePolicyConfig): void {
 }
 
 export class ScorePolicyManager {
-  public constructor(private readonly database: TransactionalDatabase) {}
+  private readonly events: EventStore;
+  public constructor(private readonly database: TransactionalDatabase) {
+    this.events = new EventStore(database);
+  }
 
   public async activate(policy: ScorePolicyConfig): Promise<void> {
     validateScorePolicy(policy);
     await this.database.transaction(async (tx) => {
       for (const dimension of DIMENSIONS) {
         const definition = { formula: FORMULAS[dimension] };
-        const fingerprint = createHash("sha256")
-          .update(canonical({ definition, eligibility: policy }))
-          .digest("hex");
+        const fingerprint = scorePolicyFingerprint(definition, policy);
         const existing = await tx.query<{ definition_hash: string | null }>(
           "SELECT definition_hash FROM score_policies WHERE dimension = $1 AND version = $2",
           [dimension, policy.version],
@@ -71,6 +83,9 @@ export class ScorePolicyManager {
           );
         }
       }
+      const previous = await tx.query<{ version: number }>(
+        "SELECT DISTINCT version FROM score_policies WHERE status = 'ACTIVE'",
+      );
       await tx.query(
         "UPDATE score_policies SET status = 'RETIRED' WHERE status = 'ACTIVE'",
       );
@@ -79,6 +94,27 @@ export class ScorePolicyManager {
          WHERE version = $1 AND dimension = ANY($2::text[])`,
         [policy.version, [...DIMENSIONS]],
       );
+      const correlationId = randomUUID();
+      await tx.query(
+        `INSERT INTO score_policy_activations (
+          policy_version, previous_policy_version, correlation_id
+        ) VALUES ($1,$2,$3)`,
+        [policy.version, previous.rows[0]?.version ?? null, correlationId],
+      );
+      await this.events.appendMany(tx, [{
+        eventId: randomUUID(),
+        eventType: "score_policy_activated",
+        eventVersion: 1,
+        aggregateType: "score_policy_activation",
+        aggregateId: correlationId,
+        expectedSequence: 0,
+        actor: { type: "system" },
+        correlationId,
+        payload: {
+          policyVersion: policy.version,
+          previousPolicyVersion: previous.rows[0]?.version ?? null,
+        },
+      }]);
     });
   }
 }

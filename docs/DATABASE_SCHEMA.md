@@ -13,6 +13,7 @@ Fuentes ejecutables:
 - `migrations/0009_knowledge_retention_invariants.sql`
 - `migrations/0010_score_policy_controls.sql`
 - `migrations/0011_scoring_snapshots.sql`
+- `migrations/0012_scoring_integrity_guards.sql`
 
 ## Agregados principales
 

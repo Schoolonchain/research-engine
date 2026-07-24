@@ -92,6 +92,15 @@ describe("Phase 6 scoring and eligibility", () => {
        WHERE status = 'ACTIVE' GROUP BY version`,
     );
     expect(active.rows).toEqual([{ version: 2, count: 4 }]);
+    const audit = await raw.query<{ activations: number; events: number; outbox: number }>(`
+      SELECT (SELECT count(*)::int FROM score_policy_activations) AS activations,
+        (SELECT count(*)::int FROM domain_events
+          WHERE event_type = 'score_policy_activated') AS events,
+        (SELECT count(*)::int FROM outbox_messages AS outbox
+          JOIN domain_events AS event ON event.event_id = outbox.event_id
+          WHERE event.event_type = 'score_policy_activated') AS outbox
+    `);
+    expect(audit.rows[0]).toEqual({ activations: 2, events: 2, outbox: 2 });
     expect((await new ScoreService(database).recalculate(proposalId))
       .dimensions.every((item) => item.policyVersion === 2)).toBe(true);
   });
@@ -137,7 +146,8 @@ describe("Phase 6 scoring and eligibility", () => {
     `);
     expect(state.rows[0]).toEqual({ jobs: 0, auth: 0, eligibility_events: 1 });
 
-    await raw.query("UPDATE evidence SET moderation_status = 'REJECTED'");
+    await raw.query("UPDATE sources SET moderation_status = 'REJECTED'");
+    await raw.query("UPDATE claims SET moderation_status = 'REJECTED'");
     const lost = await new ScoreService(database).recalculate(proposalId);
     expect(lost.eligible).toBe(false);
     expect(lost.proposalStatus).toBe("COLLECTING");
@@ -150,5 +160,26 @@ describe("Phase 6 scoring and eligibility", () => {
     expect(history.rows.map((row) => row.event_type)).toEqual([
       "threshold_reached", "proposal_became_eligible", "threshold_lost",
     ]);
+  });
+
+  it("protects policy definitions and scoring history from direct mutation", async () => {
+    await new ScoreService(database).recalculate(proposalId);
+    await expect(raw.query(
+      `UPDATE score_policies
+       SET eligibility_definition = '{"version":1,"priorityThreshold":0,
+         "progressThreshold":0,"confidenceThreshold":0,"minimumSupports":0}'::jsonb`,
+    )).rejects.toThrow("immutable");
+    await expect(raw.query(
+      "UPDATE score_runs SET eligible = NOT eligible",
+    )).rejects.toThrow("append-only");
+    const ids = await raw.query<{ proposal_id: string; policy_id: string }>(
+      `SELECT (SELECT id FROM proposals) AS proposal_id,
+        (SELECT id FROM score_policies LIMIT 1) AS policy_id`,
+    );
+    await expect(raw.query(
+      `INSERT INTO scores (proposal_id, policy_id, dimension, value)
+       VALUES ($1,$2,'PRIORITY',0)`,
+      [ids.rows[0]!.proposal_id, ids.rows[0]!.policy_id],
+    )).rejects.toThrow();
   });
 });

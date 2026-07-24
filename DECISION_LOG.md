@@ -446,3 +446,25 @@ propuesta no se considera aprobada hasta recibir confirmación humana.
 - Decisión: una Proposal ELIGIBLE que pierde umbral emite `threshold_lost` y vuelve a
   COLLECTING; ningún otro estado se sobrescribe.
 - Motivo: reversión explícita sin invadir estados administrativos o terminales.
+
+## D-054 — Verificación de fingerprint en escritura y lectura
+
+- Fecha: 2026-07-25
+- Estado: CORRECCIÓN DE REAUDITORÍA; PENDIENTE DE APROBACIÓN HUMANA DE FASE 6
+- Decisión: hacer obligatorio e inmutable el fingerprint y recalcularlo al consumir políticas.
+- Motivo: impedir alteraciones directas de definición conservando un hash obsoleto.
+
+## D-055 — Historial de scoring append-only
+
+- Fecha: 2026-07-25
+- Estado: CORRECCIÓN DE REAUDITORÍA; PENDIENTE DE APROBACIÓN HUMANA DE FASE 6
+- Decisión: prohibir UPDATE/DELETE de score_runs y Scores; todo Score exige scoreRunId.
+- Motivo: preservar snapshots reproducibles y su vínculo obligatorio.
+
+## D-056 — Moderación coherente de la cadena
+
+- Fecha: 2026-07-25
+- Estado: CORRECCIÓN DE REAUDITORÍA; PENDIENTE DE APROBACIÓN HUMANA DE FASE 6
+- Decisión: Evidence cuenta solo con ella, Claim y Source ACCEPTED; Claim con Source exige
+  ambas ACCEPTED.
+- Motivo: evitar elegibilidad basada en antecedentes moderados como rechazados.
