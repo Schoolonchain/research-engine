@@ -7,7 +7,10 @@ export interface Environment {
   readonly databasePoolMax: number;
   readonly databaseIdleTimeoutMs: number;
   readonly databaseConnectionTimeoutMs: number;
-  readonly participationHmacKey: string;
+  readonly participationHmacKeys: readonly {
+    readonly id: string;
+    readonly key: string;
+  }[];
 }
 
 function required(
@@ -66,11 +69,43 @@ function postgresUrl(source: NodeJS.ProcessEnv): string {
 export function loadEnvironment(
   source: NodeJS.ProcessEnv = process.env,
 ): Environment {
-  const participationHmacKey = required(source, "PARTICIPATION_HMAC_KEY");
-  if (participationHmacKey.length < 32) {
+  const keyringRaw = required(source, "PARTICIPATION_HMAC_KEYS");
+  let participationHmacKeys: unknown;
+  try {
+    participationHmacKeys = JSON.parse(keyringRaw);
+  } catch {
+    throw new Error("PARTICIPATION_HMAC_KEYS must be valid JSON");
+  }
+  if (
+    !Array.isArray(participationHmacKeys) ||
+    participationHmacKeys.length === 0 ||
+    participationHmacKeys.some(
+      (item) =>
+        item === null ||
+        typeof item !== "object" ||
+        typeof (item as { id?: unknown }).id !== "string" ||
+        typeof (item as { key?: unknown }).key !== "string",
+    )
+  ) {
     throw new Error(
-      "PARTICIPATION_HMAC_KEY must contain at least 32 characters",
+      "PARTICIPATION_HMAC_KEYS must be a non-empty array of id/key objects",
     );
+  }
+  const keyIds = new Set<string>();
+  for (const item of participationHmacKeys) {
+    const { id, key } = item as { id: string; key: string };
+    if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,99}$/.test(id)) {
+      throw new Error(`Invalid participation key ID: ${id}`);
+    }
+    if (keyIds.has(id)) {
+      throw new Error(`Duplicate participation key ID: ${id}`);
+    }
+    if (key.length < 32) {
+      throw new Error(
+        `Participation HMAC key ${id} must contain at least 32 characters`,
+      );
+    }
+    keyIds.add(id);
   }
 
   return Object.freeze({
@@ -87,7 +122,14 @@ export function loadEnvironment(
       "DATABASE_CONNECTION_TIMEOUT_MS",
       5_000,
     ),
-    participationHmacKey,
+    participationHmacKeys: Object.freeze(
+      participationHmacKeys.map((item) =>
+        Object.freeze({
+          id: (item as { id: string }).id,
+          key: (item as { key: string }).key,
+        }),
+      ),
+    ),
   });
 }
 

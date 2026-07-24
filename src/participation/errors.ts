@@ -40,3 +40,9 @@ export class ParticipationRateLimitError extends Error {
   }
 }
 
+export class ParticipationContentionError extends Error {
+  public constructor() {
+    super("Participation could not be committed after bounded retries");
+    this.name = "ParticipationContentionError";
+  }
+}

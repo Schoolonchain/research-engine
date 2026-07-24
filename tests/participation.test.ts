@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import { PGlite, type Transaction } from "@electric-sql/pglite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -10,6 +12,7 @@ import { loadMigrations, migrate } from "../src/db/migrations.js";
 import { buildParticipationApi } from "../src/participation/api.js";
 import {
   DuplicateSupportError,
+  ParticipationContentionError,
   ParticipationRateLimitError,
   SupportNotFoundError,
 } from "../src/participation/errors.js";
@@ -17,11 +20,16 @@ import type {
   ParticipationIdentity,
   ParticipationRatePolicy,
 } from "../src/participation/model.js";
-import { SupportService } from "../src/participation/support-service.js";
+import {
+  retryOnEventConcurrency,
+  SupportService,
+} from "../src/participation/support-service.js";
+import { EventConcurrencyError } from "../src/events/event-store.js";
 import type { ActorContext } from "../src/proposals/model.js";
 import { ProposalService } from "../src/proposals/proposal-service.js";
 
 const HMAC_KEY = "test-only-participation-key-32-bytes-minimum";
+const KEYRING = Object.freeze([{ id: "legacy-v1", key: HMAC_KEY }]);
 
 class PGliteExecutor implements DatabaseExecutor {
   public constructor(private readonly database: PGlite | Transaction) {}
@@ -77,7 +85,7 @@ describe("Participation supports and anti-abuse", () => {
     await migrate(migrationExecutor, await loadMigrations());
     transactionalDatabase = new PGliteTransactionalDatabase(database);
     proposalService = new ProposalService(transactionalDatabase);
-    supportService = new SupportService(transactionalDatabase, HMAC_KEY);
+    supportService = new SupportService(transactionalDatabase, KEYRING);
     owner = await actor(database);
   });
 
@@ -220,7 +228,7 @@ describe("Participation supports and anti-abuse", () => {
     };
     const limited = new SupportService(
       transactionalDatabase,
-      HMAC_KEY,
+      KEYRING,
       policy,
     );
     const proposals = await Promise.all([
@@ -260,6 +268,158 @@ describe("Participation supports and anti-abuse", () => {
       "SELECT count(*)::int AS count FROM supports WHERE status = 'ACTIVE'",
     );
     expect(active.rows[0]?.count).toBe(2);
+  });
+
+  it("preserves deduplication and revocation across key rotation", async () => {
+    const proposal = await openProposal("Rotating identity keys");
+    const participant = identity("rotation-stable-subject", "rotation-network");
+    const oldService = new SupportService(transactionalDatabase, KEYRING);
+    await oldService.add(participant, proposal.publicId);
+
+    const rotated = new SupportService(transactionalDatabase, [
+      {
+        id: "rotation-v2",
+        key: "new-test-participation-key-32-bytes-minimum",
+      },
+      ...KEYRING,
+    ]);
+
+    await expect(
+      rotated.add(participant, proposal.publicId),
+    ).rejects.toBeInstanceOf(DuplicateSupportError);
+
+    await rotated.revoke(participant, proposal.publicId);
+    await rotated.add(participant, proposal.publicId);
+
+    const rows = await database.query<{
+      status: string;
+      subject_key_id: string;
+    }>(
+      `
+        SELECT status, subject_key_id
+        FROM supports
+        ORDER BY created_at, id
+      `,
+    );
+    expect(rows.rows).toHaveLength(2);
+    expect(rows.rows.filter((row) => row.status === "ACTIVE")).toEqual([
+      { status: "ACTIVE", subject_key_id: "rotation-v2" },
+    ]);
+    expect(rows.rows.filter((row) => row.status === "REVOKED")).toHaveLength(1);
+  });
+
+  it("keeps rate-limit counters auditable across policy versions", async () => {
+    const first = await openProposal("Policy version one");
+    const second = await openProposal("Policy version two");
+    const participant = identity("policy-subject", "policy-network");
+    const policyOne: ParticipationRatePolicy = {
+      version: 1,
+      windowSeconds: 60,
+      retentionSeconds: 600,
+      subjectLimit: 20,
+      networkLimit: 120,
+      globalLimit: 2_000,
+    };
+    const policyTwo: ParticipationRatePolicy = {
+      ...policyOne,
+      version: 2,
+      subjectLimit: 100,
+    };
+
+    await new SupportService(
+      transactionalDatabase,
+      KEYRING,
+      policyOne,
+    ).add(participant, first.publicId);
+    await new SupportService(
+      transactionalDatabase,
+      KEYRING,
+      policyTwo,
+    ).add(participant, second.publicId);
+
+    const counters = await database.query<{
+      policy_version: number;
+      limit_snapshot: number;
+      count: number;
+    }>(
+      `
+        SELECT policy_version, limit_snapshot, count
+        FROM participation_rate_limits
+        WHERE action = 'support_add' AND scope = 'SUBJECT'
+        ORDER BY policy_version
+      `,
+    );
+    expect(counters.rows).toEqual([
+      { policy_version: 1, limit_snapshot: 20, count: 1 },
+      { policy_version: 2, limit_snapshot: 100, count: 1 },
+    ]);
+  });
+
+  it("supports concurrent attempts without corrupting the materialized count", async () => {
+    const proposal = await openProposal("Concurrent participation");
+    const results = await Promise.all([
+      supportService.add(identity("concurrent-a"), proposal.publicId),
+      supportService.add(identity("concurrent-b"), proposal.publicId),
+    ]);
+
+    expect(results.map((result) => result.supportCount).sort()).toEqual([1, 2]);
+    const state = await database.query<{
+      support_count: number;
+      active: number;
+      events: number;
+    }>(`
+      SELECT
+        (SELECT support_count FROM proposals) AS support_count,
+        (
+          SELECT count(*)::int FROM supports WHERE status = 'ACTIVE'
+        ) AS active,
+        (
+          SELECT count(*)::int FROM domain_events
+          WHERE event_type = 'support_added'
+        ) AS events
+    `);
+    expect(state.rows[0]).toEqual({
+      support_count: 2,
+      active: 2,
+      events: 2,
+    });
+  });
+
+  it("converts exhausted optimistic retries into explicit contention", async () => {
+    let attempts = 0;
+    await expect(
+      retryOnEventConcurrency(
+        async () => {
+          attempts += 1;
+          throw new EventConcurrencyError("proposal", "aggregate", 1);
+        },
+        { maxAttempts: 3, baseDelayMs: 0 },
+      ),
+    ).rejects.toBeInstanceOf(ParticipationContentionError);
+    expect(attempts).toBe(3);
+  });
+
+  it("maps exhausted contention to a retryable HTTP response", async () => {
+    const application = buildParticipationApi({
+      supports: {
+        add: async () => {
+          throw new ParticipationContentionError();
+        },
+        revoke: async () => {
+          throw new ParticipationContentionError();
+        },
+      },
+      resolveIdentity: async () => identity("contention-subject"),
+    });
+
+    const response = await application.inject({
+      method: "POST",
+      url: `/proposals/${randomUUID()}/supports`,
+    });
+    expect(response.statusCode).toBe(503);
+    expect(response.headers["retry-after"]).toBe("1");
+    expect(response.json()).toEqual({ error: "TEMPORARY_CONTENTION" });
+    await application.close();
   });
 
   it("exposes a subject-resolved API and never trusts body identity", async () => {

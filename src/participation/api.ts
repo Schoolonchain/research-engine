@@ -6,6 +6,7 @@ import Fastify, {
 import {
   DuplicateSupportError,
   ParticipationAuthenticationRequiredError,
+  ParticipationContentionError,
   ParticipationConflictError,
   ParticipationRateLimitError,
   ParticipationValidationError,
@@ -19,7 +20,7 @@ export type ParticipationIdentityResolver = (
 ) => Promise<ParticipationIdentity | undefined>;
 
 export interface ParticipationApiDependencies {
-  readonly supports: SupportService;
+  readonly supports: Pick<SupportService, "add" | "revoke">;
   readonly resolveIdentity: ParticipationIdentityResolver;
 }
 
@@ -73,6 +74,12 @@ export function buildParticipationApi(
         .header("retry-after", String(error.retryAfterSeconds))
         .status(429)
         .send({ error: "RATE_LIMITED" });
+    }
+    if (error instanceof ParticipationContentionError) {
+      return reply
+        .header("retry-after", "1")
+        .status(503)
+        .send({ error: "TEMPORARY_CONTENTION" });
     }
     if (
       error instanceof DuplicateSupportError ||

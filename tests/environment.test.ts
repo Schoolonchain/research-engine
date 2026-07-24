@@ -6,7 +6,12 @@ import { poolConfig } from "../src/db/client.js";
 const validEnvironment = {
   NODE_ENV: "test",
   DATABASE_URL: "postgresql://user:password@localhost:5432/research_engine",
-  PARTICIPATION_HMAC_KEY: "test-participation-key-at-least-32-characters",
+  PARTICIPATION_HMAC_KEYS: JSON.stringify([
+    {
+      id: "legacy-v1",
+      key: "test-participation-key-at-least-32-characters",
+    },
+  ]),
 } satisfies NodeJS.ProcessEnv;
 
 describe("environment", () => {
@@ -25,8 +30,7 @@ describe("environment", () => {
     expect(() =>
       loadEnvironment({
         NODE_ENV: "test",
-        PARTICIPATION_HMAC_KEY:
-          "test-participation-key-at-least-32-characters",
+        PARTICIPATION_HMAC_KEYS: validEnvironment.PARTICIPATION_HMAC_KEYS,
       }),
     ).toThrow(
       "Missing required environment variable: DATABASE_URL",
@@ -51,15 +55,13 @@ describe("environment", () => {
     ).toThrow("DATABASE_POOL_MAX must be a positive integer");
   });
 
-  it("rejects a weak participation HMAC key", () => {
+  it("rejects an invalid participation HMAC keyring", () => {
     expect(() =>
       loadEnvironment({
         ...validEnvironment,
-        PARTICIPATION_HMAC_KEY: "too-short",
+        PARTICIPATION_HMAC_KEYS: "not-json",
       }),
-    ).toThrow(
-      "PARTICIPATION_HMAC_KEY must contain at least 32 characters",
-    );
+    ).toThrow("PARTICIPATION_HMAC_KEYS must be valid JSON");
   });
 });
 

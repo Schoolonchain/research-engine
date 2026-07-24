@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { setTimeout as delay } from "node:timers/promises";
 
 import type { DatabaseExecutor, TransactionalDatabase } from "../db/database.js";
 import {
@@ -8,6 +9,7 @@ import {
 } from "../events/event-store.js";
 import {
   DuplicateSupportError,
+  ParticipationContentionError,
   ParticipationConflictError,
   SupportNotFoundError,
 } from "./errors.js";
@@ -15,6 +17,7 @@ import { ParticipationKeyDeriver } from "./identity.js";
 import {
   DEFAULT_PARTICIPATION_RATE_POLICY,
   type ParticipationIdentity,
+  type ParticipationKeyVersion,
   type ParticipationRatePolicy,
   type SupportResult,
 } from "./model.js";
@@ -32,8 +35,19 @@ interface SupportRow {
   readonly id: string;
 }
 
+interface ExistingSupportRow extends SupportRow {
+  readonly subject_key_hash: string;
+  readonly subject_key_id: string;
+}
+
 const MAX_CONCURRENCY_RETRIES = 3;
 const SUPPORTABLE_STATUSES = new Set(["OPEN", "COLLECTING"]);
+
+function hashPlaceholders(start: number, count: number): string {
+  return Array.from({ length: count }, (_, index) => `$${start + index}`).join(
+    ", ",
+  );
+}
 
 async function proposalForSupport(
   transaction: DatabaseExecutor,
@@ -88,11 +102,11 @@ export class SupportService {
 
   public constructor(
     private readonly database: TransactionalDatabase,
-    hmacKey: string,
+    hmacKeys: readonly ParticipationKeyVersion[],
     policy: ParticipationRatePolicy = DEFAULT_PARTICIPATION_RATE_POLICY,
   ) {
     this.events = new EventStore(database);
-    this.keys = new ParticipationKeyDeriver(hmacKey);
+    this.keys = new ParticipationKeyDeriver(hmacKeys);
     this.limiter = new ParticipationRateLimiter(database, policy);
   }
 
@@ -102,8 +116,11 @@ export class SupportService {
   ): Promise<SupportResult> {
     const keys = this.keys.derive(identity);
     await this.limiter.consume("support_add", keys);
+    if (await this.normalizeExistingSupport(proposalPublicId, keys)) {
+      throw new DuplicateSupportError();
+    }
 
-    return this.withConcurrencyRetry(async () => {
+    return retryOnEventConcurrency(async () => {
       const changed = await this.events.transactPrepared(
         async (transaction) => {
           const row = await proposalForSupport(transaction, proposalPublicId);
@@ -115,14 +132,34 @@ export class SupportService {
           );
         },
         async (transaction, command) => {
+          await this.lockSubject(transaction, keys.rateSubjectKeyHash);
+          const candidates = hashPlaceholders(
+            2,
+            keys.subjectCandidateHashes.length,
+          );
+          const duplicate = await transaction.query<SupportRow>(
+            `
+              SELECT id
+              FROM supports
+              WHERE
+                proposal_id = $1
+                AND status = 'ACTIVE'
+                AND subject_key_hash IN (${candidates})
+              LIMIT 1
+            `,
+            [command.aggregateId, ...keys.subjectCandidateHashes],
+          );
+          if (duplicate.rows[0]) throw new DuplicateSupportError();
+
           const inserted = await transaction.query<SupportRow>(
             `
               INSERT INTO supports (
-                proposal_id, actor_id, subject_key_hash, policy_version
+                proposal_id, actor_id, subject_key_hash,
+                subject_key_id, policy_version
               )
-              SELECT id, $1, $2, 1
+              SELECT id, $1, $2, $3, 1
               FROM proposals
-              WHERE id = $3
+              WHERE id = $4
               ON CONFLICT (proposal_id, subject_key_hash)
                 WHERE status = 'ACTIVE'
               DO NOTHING
@@ -131,6 +168,7 @@ export class SupportService {
             [
               identity.actorId ?? null,
               keys.subjectKeyHash,
+              keys.subjectKeyId,
               command.aggregateId,
             ],
           );
@@ -175,7 +213,7 @@ export class SupportService {
     const keys = this.keys.derive(identity);
     await this.limiter.consume("support_revoke", keys);
 
-    return this.withConcurrencyRetry(async () => {
+    return retryOnEventConcurrency(async () => {
       const changed = await this.events.transactPrepared(
         async (transaction) => {
           const row = await proposalForSupport(transaction, proposalPublicId);
@@ -187,17 +225,22 @@ export class SupportService {
           );
         },
         async (transaction, command) => {
+          await this.lockSubject(transaction, keys.rateSubjectKeyHash);
+          const candidates = hashPlaceholders(
+            2,
+            keys.subjectCandidateHashes.length,
+          );
           const revoked = await transaction.query<SupportRow>(
             `
               UPDATE supports
               SET status = 'REVOKED', revoked_at = CURRENT_TIMESTAMP
               WHERE
                 proposal_id = $1
-                AND subject_key_hash = $2
+                AND subject_key_hash IN (${candidates})
                 AND status = 'ACTIVE'
               RETURNING id
             `,
-            [command.aggregateId, keys.subjectKeyHash],
+            [command.aggregateId, ...keys.subjectCandidateHashes],
           );
           if (revoked.rowCount === 0) throw new SupportNotFoundError();
 
@@ -233,22 +276,90 @@ export class SupportService {
     });
   }
 
-  private async withConcurrencyRetry<Result>(
-    operation: () => Promise<Result>,
-  ): Promise<Result> {
-    for (let attempt = 1; attempt <= MAX_CONCURRENCY_RETRIES; attempt += 1) {
-      try {
-        return await operation();
-      } catch (error) {
-        if (
-          !(error instanceof EventConcurrencyError) ||
-          attempt === MAX_CONCURRENCY_RETRIES
-        ) {
-          throw error;
-        }
+  private async lockSubject(
+    transaction: DatabaseExecutor,
+    stableKeyHash: string,
+  ): Promise<void> {
+    await transaction.query(
+      `
+        INSERT INTO participation_subject_locks (key_hash)
+        VALUES ($1)
+        ON CONFLICT (key_hash)
+        DO UPDATE SET last_used_at = CURRENT_TIMESTAMP
+      `,
+      [stableKeyHash],
+    );
+  }
+
+  private normalizeExistingSupport(
+    proposalPublicId: string,
+    keys: ReturnType<ParticipationKeyDeriver["derive"]>,
+  ): Promise<boolean> {
+    return this.database.transaction(async (transaction) => {
+      await this.lockSubject(transaction, keys.rateSubjectKeyHash);
+      const candidates = hashPlaceholders(
+        2,
+        keys.subjectCandidateHashes.length,
+      );
+      const result = await transaction.query<ExistingSupportRow>(
+        `
+          SELECT
+            support.id,
+            support.subject_key_hash,
+            support.subject_key_id
+          FROM supports AS support
+          INNER JOIN proposals AS proposal
+            ON proposal.id = support.proposal_id
+          WHERE
+            proposal.public_id = $1
+            AND support.status = 'ACTIVE'
+            AND support.subject_key_hash IN (${candidates})
+          FOR UPDATE OF support
+          LIMIT 1
+        `,
+        [proposalPublicId, ...keys.subjectCandidateHashes],
+      );
+      const existing = result.rows[0];
+      if (!existing) return false;
+
+      if (
+        existing.subject_key_hash !== keys.subjectKeyHash ||
+        existing.subject_key_id !== keys.subjectKeyId
+      ) {
+        await transaction.query(
+          `
+            UPDATE supports
+            SET subject_key_hash = $1, subject_key_id = $2
+            WHERE id = $3
+          `,
+          [keys.subjectKeyHash, keys.subjectKeyId, existing.id],
+        );
       }
-    }
-    throw new Error("Unreachable concurrency retry state");
+      return true;
+    });
   }
 }
 
+export async function retryOnEventConcurrency<Result>(
+  operation: () => Promise<Result>,
+  options: {
+    readonly maxAttempts?: number;
+    readonly baseDelayMs?: number;
+  } = {},
+): Promise<Result> {
+  const maxAttempts = options.maxAttempts ?? MAX_CONCURRENCY_RETRIES;
+  const baseDelayMs = options.baseDelayMs ?? 5;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      return await operation();
+    } catch (error) {
+      if (!(error instanceof EventConcurrencyError)) throw error;
+      if (attempt === maxAttempts) throw new ParticipationContentionError();
+      const exponential = baseDelayMs * 2 ** (attempt - 1);
+      const jitter = Math.floor(Math.random() * Math.max(1, baseDelayMs));
+      await delay(exponential + jitter);
+    }
+  }
+  throw new ParticipationContentionError();
+}

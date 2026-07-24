@@ -159,7 +159,7 @@ Orden explícita requerida: **“Fase 3 aprobada. Integra la PR y comienza con l
 
 ## Fase 4 — Participación y apoyos
 
-**Estado: COMPLETADA LOCALMENTE EL 2026-07-24; pendiente de checkpoint humano.**
+**Estado: CORRECCIONES DE AUDITORÍA IMPLEMENTADAS EL 2026-07-24; pendiente de reauditoría y checkpoint humano.**
 
 ### Objetivo
 
@@ -190,7 +190,7 @@ Contadores consistentes y fraude limitado sin recopilar identidad innecesaria.
 - Límites versionables por sujeto, señal de red y globales.
 - Señales de abuso minimizadas con expiración.
 - Honeypot neutro; CAPTCHA adaptable desde el resolver de identidad.
-- 36 tests pasan; typecheck y build pasan.
+- 41 tests pasan; typecheck y build pasan.
 - Apoyar o revocar no crea Authorization ni ResearchJob.
 
 ### Gate

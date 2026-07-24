@@ -1,10 +1,14 @@
 import { createHmac } from "node:crypto";
 
 import type { ParticipationIdentity } from "./model.js";
+import type { ParticipationKeyVersion } from "./model.js";
 import { ParticipationValidationError } from "./errors.js";
 
 export interface ParticipationKeys {
   readonly subjectKeyHash: string;
+  readonly subjectKeyId: string;
+  readonly subjectCandidateHashes: readonly string[];
+  readonly rateSubjectKeyHash: string;
   readonly networkKeyHash?: string;
   readonly globalKeyHash: string;
 }
@@ -24,13 +28,28 @@ function validateOpaqueValue(
 }
 
 export class ParticipationKeyDeriver {
-  private readonly key: string;
+  private readonly versions: readonly ParticipationKeyVersion[];
 
-  public constructor(key: string) {
-    if (key.length < 32) {
-      throw new Error("Participation HMAC key must contain at least 32 characters");
+  public constructor(versions: readonly ParticipationKeyVersion[]) {
+    if (versions.length === 0) {
+      throw new Error("Participation keyring must contain at least one key");
     }
-    this.key = key;
+    const ids = new Set<string>();
+    for (const version of versions) {
+      if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,99}$/.test(version.id)) {
+        throw new Error(`Invalid participation key ID: ${version.id}`);
+      }
+      if (ids.has(version.id)) {
+        throw new Error(`Duplicate participation key ID: ${version.id}`);
+      }
+      if (version.key.length < 32) {
+        throw new Error(
+          `Participation HMAC key ${version.id} must contain at least 32 characters`,
+        );
+      }
+      ids.add(version.id);
+    }
+    this.versions = Object.freeze([...versions]);
   }
 
   public derive(identity: ParticipationIdentity): ParticipationKeys {
@@ -43,20 +62,29 @@ export class ParticipationKeyDeriver {
       "networkSignal",
     );
 
+    const primary = this.versions[0];
+    const stable = this.versions.at(-1);
+    if (!primary || !stable) throw new Error("Participation keyring is empty");
+    const subjectCandidateHashes = this.versions.map((version) =>
+      this.hash(version.key, "subject", subject),
+    );
+
     return Object.freeze({
-      subjectKeyHash: this.hash("subject", subject),
+      subjectKeyHash: subjectCandidateHashes[0] as string,
+      subjectKeyId: primary.id,
+      subjectCandidateHashes: Object.freeze(subjectCandidateHashes),
+      rateSubjectKeyHash: this.hash(stable.key, "subject", subject),
       ...(network
-        ? { networkKeyHash: this.hash("network", network) }
+        ? { networkKeyHash: this.hash(stable.key, "network", network) }
         : {}),
-      globalKeyHash: this.hash("global", "all-participation"),
+      globalKeyHash: this.hash(stable.key, "global", "all-participation"),
     });
   }
 
-  private hash(scope: string, value: string): string {
-    return createHmac("sha256", this.key)
+  private hash(key: string, scope: string, value: string): string {
+    return createHmac("sha256", key)
       .update(`participation:v1:${scope}:`)
       .update(value)
       .digest("hex");
   }
 }
-

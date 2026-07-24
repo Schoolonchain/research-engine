@@ -20,6 +20,11 @@ export interface ParticipationRatePolicy {
   readonly globalLimit: number;
 }
 
+export interface ParticipationKeyVersion {
+  readonly id: string;
+  readonly key: string;
+}
+
 export const DEFAULT_PARTICIPATION_RATE_POLICY: ParticipationRatePolicy =
   Object.freeze({
     version: 1,
@@ -29,4 +34,3 @@ export const DEFAULT_PARTICIPATION_RATE_POLICY: ParticipationRatePolicy =
     networkLimit: 120,
     globalLimit: 2_000,
   });
-

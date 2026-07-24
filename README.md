@@ -8,8 +8,9 @@ Knowledge Hub.
 
 **Fase 4 — Participación y apoyos.**
 
-Este repositorio todavía no expone endpoints ni ejecuta investigación. La presencia de las
-tablas `authorizations` y `research_jobs` no habilita ningún flujo operativo.
+El repositorio define constructores Fastify para Proposal y Participation, pero todavía no
+incluye un punto de entrada desplegable ni ejecuta investigación. La presencia de las tablas
+`authorizations` y `research_jobs` no habilita ningún flujo operativo.
 
 ## Requisitos
 

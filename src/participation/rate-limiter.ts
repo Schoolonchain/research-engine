@@ -38,7 +38,7 @@ export class ParticipationRateLimiter {
     const scopes: ScopeLimit[] = [
       {
         scope: "SUBJECT",
-        keyHash: keys.subjectKeyHash,
+        keyHash: keys.rateSubjectKeyHash,
         limit: this.policy.subjectLimit,
       },
       {
@@ -61,19 +61,22 @@ export class ParticipationRateLimiter {
         const result = await transaction.query<CounterRow>(
           `
             INSERT INTO participation_rate_limits (
-              action, scope, key_hash, window_started_at,
+              action, scope, key_hash, policy_version, window_started_at,
               count, limit_snapshot, expires_at
             ) VALUES (
-              $1, $2, $3,
+              $1, $2, $3, $4,
               to_timestamp(
-                floor(extract(epoch FROM CURRENT_TIMESTAMP) / $4) * $4
+                floor(extract(epoch FROM CURRENT_TIMESTAMP) / $5) * $5
               ),
-              1, $5,
-              CURRENT_TIMESTAMP + ($6 * INTERVAL '1 second')
+              1, $6,
+              CURRENT_TIMESTAMP + ($7 * INTERVAL '1 second')
             )
-            ON CONFLICT (action, scope, key_hash, window_started_at)
+            ON CONFLICT (
+              action, scope, key_hash, policy_version, window_started_at
+            )
             DO UPDATE SET
               count = participation_rate_limits.count + 1,
+              limit_snapshot = EXCLUDED.limit_snapshot,
               updated_at = CURRENT_TIMESTAMP
             RETURNING count
           `,
@@ -81,6 +84,7 @@ export class ParticipationRateLimiter {
             action,
             scope.scope,
             scope.keyHash,
+            this.policy.version,
             this.policy.windowSeconds,
             scope.limit,
             this.policy.retentionSeconds,
@@ -118,4 +122,3 @@ export class ParticipationRateLimiter {
     }
   }
 }
-

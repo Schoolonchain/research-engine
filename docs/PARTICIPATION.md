@@ -37,14 +37,29 @@ HMAC(secret, "participation:v1:subject:" + stableSubject)
 HMAC(secret, "participation:v1:network:" + networkSignal)
 ```
 
-La clave:
+El keyring:
 
-- tiene al menos 32 caracteres;
-- se carga mediante `PARTICIPATION_HMAC_KEY`;
-- no se versiona;
-- debe almacenarse en un gestor de secretos y rotarse mediante política versionada.
+- contiene objetos `{id, key}` ordenados de nueva primaria a claves anteriores;
+- exige al menos 32 caracteres por clave e IDs únicos;
+- se carga mediante `PARTICIPATION_HMAC_KEYS`;
+- no se versiona y debe almacenarse en un gestor de secretos.
 
 Los hashes se separan por dominio para impedir correlaciones accidentales.
+
+### Rotación
+
+1. Añadir una clave nueva al principio del keyring.
+2. Mantener todas las claves anteriores como lookup-only.
+3. Desplegar el mismo keyring en todas las instancias.
+4. Escribir nuevos apoyos con la primaria y su `subject_key_id`.
+5. Detectar duplicados y revocaciones con todas las claves activas.
+6. Migrar perezosamente un apoyo antiguo cuando vuelve a interactuar.
+
+La clave más antigua permanece como clave estable de locking/rate limiting durante el rolling
+deploy. Así, instancias antiguas y nuevas serializan al mismo sujeto. Una clave no puede
+retirarse mientras existan apoyos con su `subject_key_id`; esa condición es consultable. Si
+una clave se compromete, la retirada exige revocar o reidentificar esas filas mediante un
+procedimiento extraordinario.
 
 ## Añadir apoyo
 
@@ -92,8 +107,9 @@ Política inicial:
 | Network | 120 |
 | Global | 2.000 |
 
-La política es inyectable y versionable. Los contadores guardan el límite aplicado y una fecha
-de expiración. Al superar un límite:
+La política es inyectable y versionable. `policy_version` forma parte de la clave primaria del
+contador; un cambio de política abre un contador distinto incluso dentro de la misma ventana.
+Cada fila guarda el límite aplicado y una fecha de expiración. Al superar un límite:
 
 - la operación se rechaza con `429` y `Retry-After`;
 - se registra una señal `RATE_LIMIT_EXCEEDED`;
@@ -124,6 +140,7 @@ Respuestas principales:
 - `404`: no existe apoyo activo al revocar;
 - `409`: duplicado o estado incompatible;
 - `429`: límite excedido.
+- `503`: contención temporal tras agotar reintentos; incluye `Retry-After`.
 
 ## Garantías verificadas
 
@@ -136,6 +153,9 @@ Respuestas principales:
 - body no puede suplantar identidad;
 - honeypot no crea apoyo;
 - ningún camino crea ResearchJob.
+- rotación conserva deduplicación y revocación;
+- cambios de política preservan contadores y límites auditables;
+- contención usa backoff y termina en una respuesta reintentable.
 
 ## Fuera de alcance
 
@@ -144,4 +164,3 @@ Respuestas principales:
 - autorización/ResearchJob: Fase 8;
 - CAPTCHA concreto y servicio de anomalías: decisión de despliegue;
 - IA: Fase 9.
-

@@ -111,10 +111,10 @@ propuesta no se considera aprobada hasta recibir confirmación humana.
 
 | ID | Decisión | Recomendación | Bloquea |
 |---|---|---|---|
-| P-001 | Remoto privado `owner/repo` | `Schoolonchain/research-engine`, privado | Publicación/CI, no planificación |
-| P-002 | Stack de aplicación | TypeScript + PostgreSQL, monolito modular | Fase 1 |
+| P-001 | Remoto privado `owner/repo` | RESUELTA: `Schoolonchain/research-engine`, privado | No bloquea |
+| P-002 | Stack de aplicación | RESUELTA: TypeScript + PostgreSQL, monolito modular | No bloquea |
 | P-003 | Hosting y regiones | Servicios administrados en región aplicable | Infraestructura |
-| P-004 | Identidad de participantes | Pseudónimo/cuenta opcional, modelo evolutivo | Fase 4 |
+| P-004 | Identidad de participantes | PARCIAL: contrato pseudónimo listo; proveedor real pendiente | Despliegue, no dominio |
 | P-005 | Roles autorizadores/validadores | Separación de funciones | Fases 7–8 |
 | P-006 | Política de umbral | Versionada y revisable | Fase 6 |
 | P-007 | Pagos en MVP | Excluir | Parte PAYMENT de Fase 8 |
@@ -224,7 +224,7 @@ propuesta no se considera aprobada hasta recibir confirmación humana.
 ## D-026 — Identidad estable separada de señal de red
 
 - Fecha: 2026-07-24
-- Estado: ACEPTADA EN FASE 4
+- Estado: IMPLEMENTADA; PENDIENTE DE APROBACIÓN HUMANA DE FASE 4
 - Decisión: deduplicar por sujeto estable y usar red solo como señal adicional.
 - Motivo: una IP no representa una persona y una persona puede cambiar de IP.
 - Consecuencia: compartir red no impide apoyar; cambiar de red no evita deduplicación.
@@ -232,15 +232,15 @@ propuesta no se considera aprobada hasta recibir confirmación humana.
 ## D-027 — Pseudonimización mediante HMAC con separación de dominio
 
 - Fecha: 2026-07-24
-- Estado: ACEPTADA EN FASE 4
+- Estado: CORREGIDA TRAS AUDITORÍA; PENDIENTE DE APROBACIÓN HUMANA
 - Decisión: derivar claves de sujeto/red con HMAC-SHA-256 y prefijos distintos.
 - Motivo: un hash simple permitiría ataques de diccionario y correlación.
-- Consecuencia: `PARTICIPATION_HMAC_KEY` es secreto obligatorio y requiere rotación versionada.
+- Consecuencia: `PARTICIPATION_HMAC_KEYS` es un keyring secreto, ordenado y con IDs.
 
 ## D-028 — Rate limits persistentes y multidimensionales
 
 - Fecha: 2026-07-24
-- Estado: ACEPTADA EN FASE 4
+- Estado: CORREGIDA TRAS AUDITORÍA; PENDIENTE DE APROBACIÓN HUMANA
 - Decisión: límites independientes por SUBJECT, NETWORK y GLOBAL.
 - Motivo: evitar depender de una única señal y proteger recursos compartidos.
 - Consecuencia: las políticas son versionables; NETWORK usa un límite más tolerante.
@@ -248,7 +248,7 @@ propuesta no se considera aprobada hasta recibir confirmación humana.
 ## D-029 — Señales antiabuso con retención explícita
 
 - Fecha: 2026-07-24
-- Estado: ACEPTADA EN FASE 4
+- Estado: IMPLEMENTADA; PENDIENTE DE APROBACIÓN HUMANA DE FASE 4
 - Decisión: registrar solo scope, HMAC, riesgo, versión y expiración.
 - Motivo: detectar automatización sin conservar identificadores directos.
 - Consecuencia: un proceso operativo futuro deberá purgar filas expiradas.
@@ -256,8 +256,41 @@ propuesta no se considera aprobada hasta recibir confirmación humana.
 ## D-030 — CAPTCHA fuera del núcleo de participación
 
 - Fecha: 2026-07-24
-- Estado: ACEPTADA EN FASE 4
+- Estado: PROPUESTA IMPLEMENTADA; PENDIENTE DE APROBACIÓN HUMANA
 - Decisión: el resolver de identidad puede exigir challenge adaptativo; el dominio no elige
   proveedor ni almacena tokens CAPTCHA.
 - Motivo: mantener independencia de proveedor y evitar contaminar el Event Log.
 - Consecuencia: la integración concreta se define con la superficie de identidad/despliegue.
+
+## D-031 — Keyring HMAC con lookup multiclave
+
+- Fecha: 2026-07-24
+- Estado: CORRECCIÓN DE AUDITORÍA; PENDIENTE DE APROBACIÓN HUMANA
+- Decisión: escribir con la clave primaria y buscar/revocar con todas las claves activas.
+- Motivo: preservar deduplicación y revocación durante rotaciones.
+- Consecuencia: cada Support guarda `subject_key_id`; una clave no se retira mientras tenga
+  apoyos asociados.
+
+## D-032 — Lock estable durante despliegues de rotación
+
+- Fecha: 2026-07-24
+- Estado: CORRECCIÓN DE AUDITORÍA; PENDIENTE DE APROBACIÓN HUMANA
+- Decisión: serializar por hash de la clave más antigua compartida del keyring.
+- Motivo: instancias antiguas y nuevas deben adquirir el mismo lock durante rolling deploy.
+- Consecuencia: la clave antigua permanece disponible hasta completar migración y retiro.
+
+## D-033 — Contadores separados por versión de política
+
+- Fecha: 2026-07-24
+- Estado: CORRECCIÓN DE AUDITORÍA; PENDIENTE DE APROBACIÓN HUMANA
+- Decisión: incluir `policy_version` en la PK de `participation_rate_limits`.
+- Motivo: evitar reutilizar un contador con un límite histórico distinto.
+- Consecuencia: cada cambio de política abre una serie auditable separada.
+
+## D-034 — Agotamiento de contención como error reintentable
+
+- Fecha: 2026-07-24
+- Estado: CORRECCIÓN DE AUDITORÍA; PENDIENTE DE APROBACIÓN HUMANA
+- Decisión: tres intentos con backoff exponencial y jitter; después `503` + `Retry-After`.
+- Motivo: evitar `500` ambiguo y reducir contención inmediata.
+- Consecuencia: clientes pueden reintentar sin interpretar el fallo como corrupción.
