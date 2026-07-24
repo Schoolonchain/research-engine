@@ -395,3 +395,24 @@ propuesta no se considera aprobada hasta recibir confirmación humana.
 - Decisión: mantener allowlist global unicast con exclusiones explícitas basadas en el
   registro especial de IANA, incluyendo `2001::/23` y `3fff::/20`.
 - Motivo: pertenecer a `2000::/3` no implica por sí solo enrutabilidad global.
+
+## D-047 — Dimensiones de score independientes
+
+- Fecha: 2026-07-24
+- Estado: IMPLEMENTADA; PENDIENTE DE APROBACIÓN HUMANA DE FASE 6
+- Decisión: persistir Priority, Progress, Confidence y Support Count por separado.
+- Motivo: apoyo, avance y confianza no son intercambiables ni deben ocultarse en un número.
+
+## D-048 — Fórmulas y umbrales versionados
+
+- Fecha: 2026-07-24
+- Estado: IMPLEMENTADA; PENDIENTE DE APROBACIÓN HUMANA DE FASE 6
+- Decisión: cada score conserva política, entradas y explicación reproducible.
+- Motivo: permitir auditoría y evolución sin reinterpretar resultados históricos.
+
+## D-049 — Elegibilidad sin ejecución
+
+- Fecha: 2026-07-24
+- Estado: IMPLEMENTADA; PENDIENTE DE APROBACIÓN HUMANA DE FASE 6
+- Decisión: `ELIGIBLE` registra que se cumplen umbrales, sin crear Authorization o ResearchJob.
+- Motivo: preservar la autoridad humana y evitar que una métrica active coste o IA.
