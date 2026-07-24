@@ -82,19 +82,19 @@ propuesta no se considera aprobada hasta recibir confirmación humana.
 ## D-011 — No seleccionar stack durante Fase 0 sin aprobación
 
 - Fecha: 2026-07-24
-- Estado: PROPUESTA
-- Recomendación: TypeScript en monolito modular y PostgreSQL, con cola basada inicialmente
-  en la base de datos o servicio administrado según el alojamiento.
+- Estado: ACEPTADA EL 2026-07-24
+- Decisión: TypeScript estricto sobre Node.js 24, monolito modular y PostgreSQL.
+- Implementación de Fase 1: SQL explícito, adaptador `pg` y migraciones propias con checksum.
 - Alternativas:
   - Python/FastAPI + PostgreSQL: buena opción si domina el trabajo de investigación/ML.
   - TypeScript + PostgreSQL: contratos compartidos y ecosistema web homogéneo.
-- Decisión requerida: stack, equipo, presupuesto y plataforma de despliegue.
+- Consecuencia: la plataforma de despliegue sigue pendiente, pero no bloquea el modelo.
 
 ## D-012 — Pagos fuera del MVP
 
 - Fecha: 2026-07-24
-- Estado: RECOMENDACIÓN PENDIENTE
-- Decisión propuesta: implementar primero autorización administrativa y por política; diferir
+- Estado: ACEPTADA EL 2026-07-24
+- Decisión: implementar primero autorización administrativa y por política; diferir
   pagos hasta definir proveedor, reembolsos, fraude, fiscalidad y privacidad.
 - Consecuencia: no bloquea propuestas, evidencias, scores ni Research Jobs autorizados por
   otros mecanismos.
@@ -122,3 +122,27 @@ propuesta no se considera aprobada hasta recibir confirmación humana.
 | P-009 | Proveedores de búsqueda/IA y presupuesto | Evaluar en Fase 9 | Ejecución IA |
 | P-010 | Método de integración | JSON + PR revisable | Fase 10 |
 
+## D-014 — Migraciones SQL explícitas y verificadas con PGlite
+
+- Fecha: 2026-07-24
+- Estado: ACEPTADA EN FASE 1
+- Decisión: mantener el esquema fuente en migraciones SQL PostgreSQL, sin ORM.
+- Motivo: control visible de constraints, índices parciales, JSONB y transacciones.
+- Verificación: ejecutar la migración real en PGlite durante tests.
+- Consecuencia: una migración aplicada es inmutable; los cambios requieren una nueva versión.
+
+## D-015 — Scripts de dependencias denegados salvo allowlist
+
+- Fecha: 2026-07-24
+- Estado: ACEPTADA EN FASE 1
+- Decisión: pnpm solo permite el script de instalación de `esbuild`.
+- Motivo: reducir riesgo de cadena de suministro manteniendo operativas las herramientas.
+- Consecuencia: cualquier paquete futuro con scripts requiere revisión y decisión explícita.
+
+## D-016 — La presencia de ResearchJob no habilita ejecución
+
+- Fecha: 2026-07-24
+- Estado: ACEPTADA EN FASE 1
+- Decisión: modelar límites y relaciones ahora, sin crear servicio, cola ni worker.
+- Motivo: continuidad del esquema sin violar el gate de Fase 8.
+- Consecuencia: ninguna acción puede crear o ejecutar trabajos en Fase 1.

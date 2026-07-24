@@ -33,6 +33,8 @@ Orden explícita requerida: **“Plan aprobado. Comienza con la Fase 1.”**
 
 ## Fase 1 — Fundación y modelo de datos
 
+**Estado: COMPLETADA LOCALMENTE EL 2026-07-24; pendiente de checkpoint humano.**
+
 ### Objetivo
 
 Crear el esqueleto técnico y el esquema persistente sin endpoints de producto.
@@ -57,6 +59,22 @@ Crear el esqueleto técnico y el esquema persistente sin endpoints de producto.
 ### Criterio de éxito
 
 Esquema reproducible, documentado y validado en CI; sin flujo funcional expuesto.
+
+### Resultado verificado
+
+- Stack fijado: TypeScript estricto sobre Node.js 24 y PostgreSQL.
+- Migración `0001_initial_domain.sql` con doce tablas de dominio/control.
+- Runner transaccional con checksum e idempotencia.
+- Configuración validada y secretos locales excluidos.
+- Lockfile y allowlist de scripts de instalación.
+- CI con permisos de solo lectura.
+- 10 tests pasan sobre PostgreSQL embebido.
+- Typecheck y build pasan.
+- No se crearon endpoints, cola, worker, autenticación ni integración con IA.
+
+### Gate
+
+Orden explícita requerida: **“Fase 1 aprobada. Comienza con la Fase 2.”**
 
 ## Fase 2 — Eventos, auditoría y outbox
 
@@ -303,4 +321,3 @@ En cada fase:
 4. Definir quién puede autorizar y validar.
 5. Confirmar si pagos quedan fuera del MVP.
 6. Fijar jurisdicción, privacidad y retenciones.
-
