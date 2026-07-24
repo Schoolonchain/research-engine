@@ -4,6 +4,7 @@ import type { ActorContext } from "../proposals/model.js";
 import {
   KnowledgeConflictError,
   KnowledgeNotFoundError,
+  KnowledgeRateLimitError,
   KnowledgeValidationError,
   UnsafeSourceError,
 } from "./errors.js";
@@ -19,11 +20,15 @@ export interface KnowledgeApiDependencies {
   readonly authenticate: KnowledgeAuthenticator;
 }
 
-function body<Body>(request: FastifyRequest): Body {
+function body<Body>(request: FastifyRequest, allowed: readonly string[]): Body {
   if (!request.body || typeof request.body !== "object" || Array.isArray(request.body)) {
     throw new KnowledgeValidationError("A JSON object body is required");
   }
-  return request.body as Body;
+  const value = request.body as Record<string, unknown>;
+  if (Object.keys(value).some((key) => !allowed.includes(key))) {
+    throw new KnowledgeValidationError("Unknown request property");
+  }
+  return value as Body;
 }
 
 function parameter(request: FastifyRequest, name: string): string {
@@ -60,6 +65,10 @@ export function buildKnowledgeApi(
     if (error instanceof KnowledgeConflictError) {
       return reply.status(409).send({ error: "CONFLICT" });
     }
+    if (error instanceof KnowledgeRateLimitError) {
+      return reply.header("retry-after", String(error.retryAfterSeconds))
+        .status(429).send({ error: "RATE_LIMITED" });
+    }
     return reply.status(500).send({ error: "INTERNAL_ERROR" });
   });
 
@@ -68,7 +77,7 @@ export function buildKnowledgeApi(
       await dependencies.knowledge.addUrlSource(
         await actor(request, dependencies.authenticate),
         parameter(request, "proposalId"),
-        body<AddUrlSourceInput>(request),
+        body<AddUrlSourceInput>(request, ["idempotencyKey", "url", "title"]),
       ),
     ));
   app.post("/proposals/:proposalId/claims", async (request, reply) =>
@@ -76,7 +85,9 @@ export function buildKnowledgeApi(
       await dependencies.knowledge.addClaim(
         await actor(request, dependencies.authenticate),
         parameter(request, "proposalId"),
-        body<AddClaimInput>(request),
+        body<AddClaimInput>(request, [
+          "idempotencyKey", "sourcePublicId", "statement", "classification", "context",
+        ]),
       ),
     ));
   app.post("/claims/:claimId/evidence", async (request, reply) =>
@@ -84,7 +95,9 @@ export function buildKnowledgeApi(
       await dependencies.knowledge.addEvidence(
         await actor(request, dependencies.authenticate),
         parameter(request, "claimId"),
-        body<AddEvidenceInput>(request),
+        body<AddEvidenceInput>(request, [
+          "idempotencyKey", "sourcePublicId", "stance", "locator", "excerpt", "context",
+        ]),
       ),
     ));
   return app;

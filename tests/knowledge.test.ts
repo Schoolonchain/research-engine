@@ -7,7 +7,7 @@ import type {
   TransactionalDatabase,
 } from "../src/db/database.js";
 import { loadMigrations, migrate } from "../src/db/migrations.js";
-import { KnowledgeConflictError, KnowledgeNotFoundError, UnsafeSourceError } from "../src/knowledge/errors.js";
+import { KnowledgeConflictError, KnowledgeNotFoundError, KnowledgeRateLimitError, UnsafeSourceError } from "../src/knowledge/errors.js";
 import { KnowledgeService } from "../src/knowledge/knowledge-service.js";
 import { buildKnowledgeApi } from "../src/knowledge/api.js";
 import { SafeSourceFetcher } from "../src/knowledge/safe-fetcher.js";
@@ -58,6 +58,7 @@ describe("Phase 5 knowledge contributions", () => {
 
   it("canonicalizes and deduplicates URL sources without creating research work", async () => {
     const source = await knowledge.addUrlSource(actor, proposalPublicId, {
+      idempotencyKey: "source-canonical-1",
       url: "HTTPS://Example.COM:443/article?utm_source=x&b=2&a=1#fragment",
       title: "  Example ",
     });
@@ -65,6 +66,7 @@ describe("Phase 5 knowledge contributions", () => {
     expect(source.title).toBe("Example");
     await expect(
       knowledge.addUrlSource(actor, proposalPublicId, {
+        idempotencyKey: "source-canonical-2",
         url: "https://example.com/article?b=2&a=1",
       }),
     ).rejects.toBeInstanceOf(KnowledgeConflictError);
@@ -73,13 +75,15 @@ describe("Phase 5 knowledge contributions", () => {
   });
 
   it("keeps claim and evidence separate and auditable", async () => {
-    const source = await knowledge.addUrlSource(actor, proposalPublicId, { url: "https://example.org/paper" });
+    const source = await knowledge.addUrlSource(actor, proposalPublicId, { idempotencyKey: "source-paper-1", url: "https://example.org/paper" });
     const claim = await knowledge.addClaim(actor, proposalPublicId, {
+      idempotencyKey: "claim-paper-1",
       sourcePublicId: source.publicId,
       statement: "The reported effect is measurable.",
       classification: "CLAIM",
     });
     const evidence = await knowledge.addEvidence(actor, claim.publicId, {
+      idempotencyKey: "evidence-paper-1",
       sourcePublicId: source.publicId,
       stance: "SUPPORTS",
       locator: "page 4",
@@ -96,13 +100,14 @@ describe("Phase 5 knowledge contributions", () => {
   });
 
   it("rejects cross-proposal evidence relationships", async () => {
-    const source = await knowledge.addUrlSource(actor, proposalPublicId, { url: "https://example.org/source" });
-    const claim = await knowledge.addClaim(actor, proposalPublicId, { statement: "A claim" });
+    const source = await knowledge.addUrlSource(actor, proposalPublicId, { idempotencyKey: "source-relation-1", url: "https://example.org/source" });
+    const claim = await knowledge.addClaim(actor, proposalPublicId, { idempotencyKey: "claim-relation-1", statement: "A claim" });
     const other = await proposals.create(actor, { title: "Other", centralQuestion: "Other evidence?" });
     const opened = await proposals.open(actor, other.publicId, { expectedVersion: 1 });
-    const foreignSource = await knowledge.addUrlSource(actor, opened.publicId, { url: "https://example.net/foreign" });
+    const foreignSource = await knowledge.addUrlSource(actor, opened.publicId, { idempotencyKey: "source-foreign-1", url: "https://example.net/foreign" });
     await expect(
       knowledge.addEvidence(actor, claim.publicId, {
+        idempotencyKey: "evidence-relation-1",
         sourcePublicId: foreignSource.publicId,
         stance: "CONTRADICTS",
       }),
@@ -119,17 +124,61 @@ describe("Phase 5 knowledge contributions", () => {
     const denied = await app.inject({
       method: "POST",
       url: `/proposals/${proposalPublicId}/sources`,
-      payload: { url: "https://example.com" },
+      payload: { idempotencyKey: "api-source-denied", url: "https://example.com" },
     });
     expect(denied.statusCode).toBe(401);
+    const rejectedUnknown = await app.inject({
+      method: "POST",
+      url: `/proposals/${proposalPublicId}/sources`,
+      headers: { authorization: "Bearer valid" },
+      payload: { idempotencyKey: "api-source-created", url: "https://example.com", actorId: "spoofed" },
+    });
+    expect(rejectedUnknown.statusCode).toBe(400);
     const created = await app.inject({
       method: "POST",
       url: `/proposals/${proposalPublicId}/sources`,
       headers: { authorization: "Bearer valid" },
-      payload: { url: "https://example.com", actorId: "spoofed" },
+      payload: { idempotencyKey: "api-source-valid-1", url: "https://example.com" },
     });
     expect(created.statusCode).toBe(201);
     await app.close();
+  });
+
+  it("enforces a persistent versioned actor quota", async () => {
+    const limited = new KnowledgeService(new Database(raw), {
+      version: 9,
+      windowSeconds: 60,
+      retentionSeconds: 600,
+      actorLimits: { source_add: 1, claim_add: 1, evidence_add: 1 },
+      globalLimit: 10,
+    });
+    await limited.addUrlSource(actor, proposalPublicId, {
+      idempotencyKey: "limited-source-1",
+      url: "https://example.com/one",
+    });
+    await expect(limited.addUrlSource(actor, proposalPublicId, {
+      idempotencyKey: "limited-source-2",
+      url: "https://example.com/two",
+    })).rejects.toBeInstanceOf(KnowledgeRateLimitError);
+  });
+
+  it("enforces evidence uniqueness and proposal relations in the database", async () => {
+    const source = await knowledge.addUrlSource(actor, proposalPublicId, {
+      idempotencyKey: "db-source-1", url: "https://example.com/db",
+    });
+    const claim = await knowledge.addClaim(actor, proposalPublicId, {
+      idempotencyKey: "db-claim-1", statement: "Database invariant",
+    });
+    await knowledge.addEvidence(actor, claim.publicId, {
+      idempotencyKey: "db-evidence-1", sourcePublicId: source.publicId, stance: "SUPPORTS",
+    });
+    const ids = await raw.query<{ claim_id: string; source_id: string }>(
+      "SELECT (SELECT id FROM claims) AS claim_id, (SELECT id FROM sources) AS source_id",
+    );
+    await expect(raw.query(
+      "INSERT INTO evidence (claim_id, source_id, stance) VALUES ($1,$2,'SUPPORTS')",
+      [ids.rows[0]!.claim_id, ids.rows[0]!.source_id],
+    )).rejects.toThrow();
   });
 });
 
@@ -179,5 +228,29 @@ describe("SSRF-resistant source fetch policy", () => {
       }),
     });
     await expect(oversized.fetch("https://example.com")).rejects.toBeInstanceOf(UnsafeSourceError);
+  });
+
+  it.each([
+    "::ffff:127.0.0.1",
+    "::ffff:10.0.0.1",
+    "::ffff:7f00:1",
+    "192.0.2.1",
+    "198.18.0.1",
+    "240.0.0.1",
+    "2001:db8::1",
+  ])("rejects non-global address %s", async (address) => {
+    const fetcher = new SafeSourceFetcher(
+      { resolve: async () => [address] },
+      { request: async () => ({ status: 200, contentType: "text/plain", body: new Uint8Array() }) },
+    );
+    await expect(fetcher.fetch("https://example.com")).rejects.toBeInstanceOf(UnsafeSourceError);
+  });
+
+  it("rejects mixed public/private DNS answers", async () => {
+    const fetcher = new SafeSourceFetcher(
+      { resolve: async () => ["93.184.216.34", "10.0.0.1"] },
+      { request: async () => ({ status: 200, contentType: "text/plain", body: new Uint8Array() }) },
+    );
+    await expect(fetcher.fetch("https://example.com")).rejects.toBeInstanceOf(UnsafeSourceError);
   });
 });

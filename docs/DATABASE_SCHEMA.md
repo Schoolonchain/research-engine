@@ -9,6 +9,7 @@ Fuentes ejecutables:
 - `migrations/0005_participation_key_safety.sql`
 - `migrations/0006_participation_key_registry.sql`
 - `migrations/0007_participation_key_backfill_index.sql`
+- `migrations/0008_knowledge_integrity_controls.sql`
 
 ## Agregados principales
 
@@ -99,7 +100,7 @@ CONFLICTING_EVIDENCE y CITATIONS separados en documentos JSON.
 
 Los tests ejecutan la migración sobre PostgreSQL embebido y comprueban:
 
-1. creación de las veintidós tablas previstas;
+1. creación de las veintitrés tablas previstas;
 2. segunda ejecución idempotente;
 3. relaciones separadas Source–Claim–Evidence;
 4. rechazo de apoyos activos duplicados;

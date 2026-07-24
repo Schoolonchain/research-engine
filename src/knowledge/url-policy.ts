@@ -1,8 +1,21 @@
-import { isIP } from "node:net";
+import { BlockList, isIP } from "node:net";
 
 import { UnsafeSourceError } from "./errors.js";
 
 const BLOCKED_HOSTS = new Set(["localhost", "localhost.localdomain"]);
+const NON_GLOBAL = new BlockList();
+for (const [network, prefix] of [
+  ["0.0.0.0", 8], ["10.0.0.0", 8], ["100.64.0.0", 10],
+  ["127.0.0.0", 8], ["169.254.0.0", 16], ["172.16.0.0", 12],
+  ["192.0.0.0", 24], ["192.0.2.0", 24], ["192.88.99.0", 24],
+  ["192.168.0.0", 16], ["198.18.0.0", 15], ["198.51.100.0", 24],
+  ["203.0.113.0", 24], ["224.0.0.0", 4], ["240.0.0.0", 4],
+] as const) NON_GLOBAL.addSubnet(network, prefix, "ipv4");
+for (const [network, prefix] of [
+  ["::", 128], ["::1", 128], ["100::", 64], ["2001:2::", 48],
+  ["::ffff:0:0", 96], ["2001:db8::", 32], ["fc00::", 7],
+  ["fe80::", 10], ["ff00::", 8],
+] as const) NON_GLOBAL.addSubnet(network, prefix, "ipv6");
 
 function defaultPort(protocol: string): string {
   return protocol === "https:" ? "443" : "80";
@@ -43,19 +56,11 @@ export function assertPublicAddress(address: string): void {
   const version = isIP(address);
   if (version === 0) throw new UnsafeSourceError("DNS returned an invalid IP");
   const normalized = address.toLowerCase();
-  const blockedV4 =
-    /^(10\.|127\.|169\.254\.|192\.168\.|0\.)/u.test(normalized) ||
-    /^172\.(1[6-9]|2\d|3[01])\./u.test(normalized) ||
-    /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./u.test(normalized) ||
-    /^22[4-9]\.|^23\d\./u.test(normalized);
-  const blockedV6 =
-    normalized === "::1" ||
-    normalized === "::" ||
-    normalized.startsWith("fc") ||
-    normalized.startsWith("fd") ||
-    /^fe[89ab]/u.test(normalized) ||
-    normalized.startsWith("ff");
-  if (blockedV4 || blockedV6) {
+  const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/u.exec(normalized)?.[1];
+  if (
+    (mapped && (isIP(mapped) !== 4 || NON_GLOBAL.check(mapped, "ipv4"))) ||
+    NON_GLOBAL.check(normalized, version === 4 ? "ipv4" : "ipv6")
+  ) {
     throw new UnsafeSourceError("Source resolves to a non-public address");
   }
 }

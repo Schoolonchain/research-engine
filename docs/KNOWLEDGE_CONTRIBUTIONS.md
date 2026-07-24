@@ -12,6 +12,9 @@
 Solo se aceptan contribuciones para Proposals `OPEN` o `COLLECTING`. La identidad procede de
 un autenticador inyectado y nunca de IDs incluidos en el body.
 
+Cada escritura requiere `idempotencyKey` y está sujeta a contadores persistentes versionados
+por actor y globales. El agotamiento responde `429` con `Retry-After`.
+
 ## URL y deduplicación
 
 Solo se admiten HTTP/HTTPS, sin credenciales ni puertos no estándar. Se normalizan host,
@@ -26,7 +29,8 @@ loopback, link-local, multicast o inválidas. El transporte recibe las direccion
 timeout y límite de bytes; deberá fijar la conexión a una de ellas para impedir DNS rebinding.
 
 Se permiten HTML, texto, JSON y PDF, hasta 1 MB y tres redirecciones. El transporte de
-producción queda fuera de esta fase.
+producción queda bloqueado hasta una auditoría específica que demuestre conexión fijada a la
+IP validada, timeout real y corte de streaming al alcanzar el límite.
 
 ## Contenido hostil
 
@@ -43,3 +47,5 @@ futura deberá aplicar escaping contextual y no interpretar markup aportado.
 
 Los constructores Fastify existen para integración, pero no hay entrypoint desplegable.
 Cada mutación produce evento minimizado y Outbox atómico, sin copiar URL ni contenido.
+Triggers de base de datos impiden relaciones entre Proposals distintas y una restricción
+`NULLS NOT DISTINCT` evita Evidence duplicada aunque `locator` sea nulo.

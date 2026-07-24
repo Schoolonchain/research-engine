@@ -25,3 +25,10 @@ export class UnsafeSourceError extends Error {
     this.name = "UnsafeSourceError";
   }
 }
+
+export class KnowledgeRateLimitError extends Error {
+  public constructor(public readonly retryAfterSeconds: number) {
+    super("Knowledge contribution rate limit exceeded");
+    this.name = "KnowledgeRateLimitError";
+  }
+}

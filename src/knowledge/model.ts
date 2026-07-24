@@ -13,11 +13,13 @@ export type EvidenceStance =
   | "UNKNOWN";
 
 export interface AddUrlSourceInput {
+  readonly idempotencyKey: string;
   readonly url: string;
   readonly title?: string;
 }
 
 export interface AddClaimInput {
+  readonly idempotencyKey: string;
   readonly sourcePublicId?: string;
   readonly statement: string;
   readonly classification?: ClaimClassification;
@@ -25,6 +27,7 @@ export interface AddClaimInput {
 }
 
 export interface AddEvidenceInput {
+  readonly idempotencyKey: string;
   readonly sourcePublicId: string;
   readonly stance: EvidenceStance;
   readonly locator?: string;

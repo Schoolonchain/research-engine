@@ -224,7 +224,7 @@ propuesta no se considera aprobada hasta recibir confirmación humana.
 ## D-026 — Identidad estable separada de señal de red
 
 - Fecha: 2026-07-24
-- Estado: IMPLEMENTADA; PENDIENTE DE APROBACIÓN HUMANA DE FASE 4
+- Estado: ACEPTADA CON LA INTEGRACIÓN DE FASE 4
 - Decisión: deduplicar por sujeto estable y usar red solo como señal adicional.
 - Motivo: una IP no representa una persona y una persona puede cambiar de IP.
 - Consecuencia: compartir red no impide apoyar; cambiar de red no evita deduplicación.
@@ -232,7 +232,7 @@ propuesta no se considera aprobada hasta recibir confirmación humana.
 ## D-027 — Pseudonimización mediante HMAC con separación de dominio
 
 - Fecha: 2026-07-24
-- Estado: CORREGIDA TRAS AUDITORÍA; PENDIENTE DE APROBACIÓN HUMANA
+- Estado: ACEPTADA CON LA INTEGRACIÓN DE FASE 4
 - Decisión: derivar claves de sujeto/red con HMAC-SHA-256 y prefijos distintos.
 - Motivo: un hash simple permitiría ataques de diccionario y correlación.
 - Consecuencia: `PARTICIPATION_HMAC_KEYS` es un keyring secreto, ordenado y con IDs.
@@ -240,7 +240,7 @@ propuesta no se considera aprobada hasta recibir confirmación humana.
 ## D-028 — Rate limits persistentes y multidimensionales
 
 - Fecha: 2026-07-24
-- Estado: CORREGIDA TRAS AUDITORÍA; PENDIENTE DE APROBACIÓN HUMANA
+- Estado: ACEPTADA CON LA INTEGRACIÓN DE FASE 4
 - Decisión: límites independientes por SUBJECT, NETWORK y GLOBAL.
 - Motivo: evitar depender de una única señal y proteger recursos compartidos.
 - Consecuencia: las políticas son versionables; NETWORK usa un límite más tolerante.
@@ -248,7 +248,7 @@ propuesta no se considera aprobada hasta recibir confirmación humana.
 ## D-029 — Señales antiabuso con retención explícita
 
 - Fecha: 2026-07-24
-- Estado: IMPLEMENTADA; PENDIENTE DE APROBACIÓN HUMANA DE FASE 4
+- Estado: ACEPTADA CON LA INTEGRACIÓN DE FASE 4
 - Decisión: registrar solo scope, HMAC, riesgo, versión y expiración.
 - Motivo: detectar automatización sin conservar identificadores directos.
 - Consecuencia: un proceso operativo futuro deberá purgar filas expiradas.
@@ -256,7 +256,7 @@ propuesta no se considera aprobada hasta recibir confirmación humana.
 ## D-030 — CAPTCHA fuera del núcleo de participación
 
 - Fecha: 2026-07-24
-- Estado: PROPUESTA IMPLEMENTADA; PENDIENTE DE APROBACIÓN HUMANA
+- Estado: ACEPTADA CON LA INTEGRACIÓN DE FASE 4
 - Decisión: el resolver de identidad puede exigir challenge adaptativo; el dominio no elige
   proveedor ni almacena tokens CAPTCHA.
 - Motivo: mantener independencia de proveedor y evitar contaminar el Event Log.
@@ -265,7 +265,7 @@ propuesta no se considera aprobada hasta recibir confirmación humana.
 ## D-031 — Keyring HMAC con lookup multiclave
 
 - Fecha: 2026-07-24
-- Estado: CORRECCIÓN DE AUDITORÍA; PENDIENTE DE APROBACIÓN HUMANA
+- Estado: ACEPTADA CON LA INTEGRACIÓN DE FASE 4
 - Decisión: escribir con la clave primaria y buscar/revocar con todas las claves activas.
 - Motivo: preservar deduplicación y revocación durante rotaciones.
 - Consecuencia: cada Support guarda `subject_key_id`; una clave no se retira mientras tenga
@@ -274,7 +274,7 @@ propuesta no se considera aprobada hasta recibir confirmación humana.
 ## D-032 — Lock estable durante despliegues de rotación
 
 - Fecha: 2026-07-24
-- Estado: CORRECCIÓN DE AUDITORÍA; PENDIENTE DE APROBACIÓN HUMANA
+- Estado: ACEPTADA CON LA INTEGRACIÓN DE FASE 4
 - Decisión: serializar por hash de la clave más antigua compartida del keyring.
 - Motivo: instancias antiguas y nuevas deben adquirir el mismo lock durante rolling deploy.
 - Consecuencia: la clave antigua permanece disponible hasta completar migración y retiro.
@@ -282,7 +282,7 @@ propuesta no se considera aprobada hasta recibir confirmación humana.
 ## D-033 — Contadores separados por versión de política
 
 - Fecha: 2026-07-24
-- Estado: CORRECCIÓN DE AUDITORÍA; PENDIENTE DE APROBACIÓN HUMANA
+- Estado: ACEPTADA CON LA INTEGRACIÓN DE FASE 4
 - Decisión: incluir `policy_version` en la PK de `participation_rate_limits`.
 - Motivo: evitar reutilizar un contador con un límite histórico distinto.
 - Consecuencia: cada cambio de política abre una serie auditable separada.
@@ -290,7 +290,7 @@ propuesta no se considera aprobada hasta recibir confirmación humana.
 ## D-034 — Agotamiento de contención como error reintentable
 
 - Fecha: 2026-07-24
-- Estado: CORRECCIÓN DE AUDITORÍA; PENDIENTE DE APROBACIÓN HUMANA
+- Estado: ACEPTADA CON LA INTEGRACIÓN DE FASE 4
 - Decisión: tres intentos con backoff exponencial y jitter; después `503` + `Retry-After`.
 - Motivo: evitar `500` ambiguo y reducir contención inmediata.
 - Consecuencia: clientes pueden reintentar sin interpretar el fallo como corrupción.
@@ -298,7 +298,7 @@ propuesta no se considera aprobada hasta recibir confirmación humana.
 ## D-035 — Guard de cobertura del keyring
 
 - Fecha: 2026-07-24
-- Estado: CORRECCIÓN DE REAUDITORÍA; PENDIENTE DE APROBACIÓN HUMANA
+- Estado: ACEPTADA CON LA INTEGRACIÓN DE FASE 4
 - Decisión: bloquear activación y operaciones si una clave usada por apoyos activos falta del
   keyring configurado.
 - Motivo: una retirada prematura no puede reactivar apoyos duplicados.
@@ -307,7 +307,7 @@ propuesta no se considera aprobada hasta recibir confirmación humana.
 ## D-036 — Locks pseudónimos temporales
 
 - Fecha: 2026-07-24
-- Estado: CORRECCIÓN DE REAUDITORÍA; PENDIENTE DE APROBACIÓN HUMANA
+- Estado: ACEPTADA CON LA INTEGRACIÓN DE FASE 4
 - Decisión: crear locks solo para Proposals válidas, renovarlos por 24 horas y purgar los
   vencidos durante operaciones posteriores.
 - Motivo: limitar retención y crecimiento persistente sin perder serialización transaccional.
@@ -316,7 +316,7 @@ propuesta no se considera aprobada hasta recibir confirmación humana.
 ## D-037 — Auditoría restringida del rehash
 
 - Fecha: 2026-07-24
-- Estado: CORRECCIÓN DE REAUDITORÍA; PENDIENTE DE APROBACIÓN HUMANA
+- Estado: ACEPTADA CON LA INTEGRACIÓN DE FASE 4
 - Decisión: registrar cambios de key ID en una tabla restringida, sin Event Log, Outbox ni
   conservación del hash anterior.
 - Motivo: el rehash es mantenimiento de seguridad, no una mutación de la voluntad del
@@ -326,7 +326,7 @@ propuesta no se considera aprobada hasta recibir confirmación humana.
 ## D-038 — Registro inmutable ID–verificador de clave
 
 - Fecha: 2026-07-24
-- Estado: CORRECCIÓN DE REAUDITORÍA; PENDIENTE DE APROBACIÓN HUMANA
+- Estado: ACEPTADA CON LA INTEGRACIÓN DE FASE 4
 - Decisión: persistir un verificador HMAC por key ID y el contador transaccional de apoyos
   activos asociado.
 - Motivo: impedir la sustitución silenciosa del secreto bajo el mismo ID y evitar escaneos
@@ -337,7 +337,7 @@ propuesta no se considera aprobada hasta recibir confirmación humana.
 ## D-039 — Separar backfill y readiness ordinario
 
 - Fecha: 2026-07-24
-- Estado: CORRECCIÓN DE REAUDITORÍA; PENDIENTE DE APROBACIÓN HUMANA
+- Estado: ACEPTADA CON LA INTEGRACIÓN DE FASE 4
 - Decisión: consultar primero el registro de claves y ejecutar el backfill indexado únicamente
   cuando el ID todavía no exista.
 - Motivo: `ON CONFLICT` no evita evaluar el `count(*)` de su consulta fuente.
