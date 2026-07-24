@@ -129,6 +129,33 @@ export class EventStore {
     });
   }
 
+  public async transactMany<Result>(
+    commands: readonly AppendEventCommand[],
+    mutateState: (transaction: DatabaseExecutor) => Promise<Result>,
+  ): Promise<{ readonly result: Result; readonly events: readonly StoredEvent[] }> {
+    commands.forEach(validateCommand);
+    return this.database.transaction(async (transaction) => {
+      const result = await mutateState(transaction);
+      const events: StoredEvent[] = [];
+      for (const command of commands) {
+        events.push(await this.append(transaction, command));
+      }
+      return Object.freeze({ result, events: Object.freeze(events) });
+    });
+  }
+
+  public async appendMany(
+    transaction: DatabaseExecutor,
+    commands: readonly AppendEventCommand[],
+  ): Promise<readonly StoredEvent[]> {
+    commands.forEach(validateCommand);
+    const events: StoredEvent[] = [];
+    for (const command of commands) {
+      events.push(await this.append(transaction, command));
+    }
+    return Object.freeze(events);
+  }
+
   public async transactPrepared<Result>(
     prepare: (
       transaction: DatabaseExecutor,

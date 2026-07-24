@@ -5,6 +5,7 @@ import { loadMigrations, migrate } from "../src/db/migrations.js";
 import { ProposalService } from "../src/proposals/proposal-service.js";
 import type { ActorContext } from "../src/proposals/model.js";
 import { ScoreService } from "../src/scoring/score-service.js";
+import { ScorePolicyManager } from "../src/scoring/policy-manager.js";
 
 class Executor implements DatabaseExecutor {
   public constructor(private readonly db: PGlite | Transaction) {}
@@ -42,6 +43,13 @@ describe("Phase 6 scoring and eligibility", () => {
       title: "Scored proposal", centralQuestion: "Is scoring reproducible?",
     });
     proposalId = (await proposals.open(actor, created.publicId, { expectedVersion: 1 })).publicId;
+    await new ScorePolicyManager(database).activate({
+      version: 1,
+      priorityThreshold: 0.55,
+      progressThreshold: 0.3,
+      confidenceThreshold: 0.4,
+      minimumSupports: 3,
+    });
   });
 
   afterEach(async () => raw.close());
@@ -60,7 +68,32 @@ describe("Phase 6 scoring and eligibility", () => {
         (SELECT count(*)::int FROM research_jobs) AS jobs,
         (SELECT count(*)::int FROM authorizations) AS authorizations
     `);
-    expect(state.rows[0]).toEqual({ scores: 4, jobs: 0, authorizations: 0 });
+    expect(state.rows[0]).toEqual({ scores: 8, jobs: 0, authorizations: 0 });
+  });
+
+  it("keeps policy versions immutable and activates a new version atomically", async () => {
+    const manager = new ScorePolicyManager(database);
+    await expect(manager.activate({
+      version: 1,
+      priorityThreshold: 0,
+      progressThreshold: 0,
+      confidenceThreshold: 0,
+      minimumSupports: 0,
+    })).rejects.toThrow("immutable");
+    await manager.activate({
+      version: 2,
+      priorityThreshold: 0.6,
+      progressThreshold: 0.4,
+      confidenceThreshold: 0.5,
+      minimumSupports: 5,
+    });
+    const active = await raw.query<{ version: number; count: number }>(
+      `SELECT version, count(*)::int AS count FROM score_policies
+       WHERE status = 'ACTIVE' GROUP BY version`,
+    );
+    expect(active.rows).toEqual([{ version: 2, count: 4 }]);
+    expect((await new ScoreService(database).recalculate(proposalId))
+      .dimensions.every((item) => item.policyVersion === 2)).toBe(true);
   });
 
   it("marks an evidenced proposal eligible but never authorizes or queues it", async () => {
@@ -69,8 +102,9 @@ describe("Phase 6 scoring and eligibility", () => {
       [proposalId],
     );
     const source = await raw.query<{ id: string }>(
-      `INSERT INTO sources (proposal_id, kind, original_url, canonical_url)
-       VALUES ($1,'URL','https://example.com','https://example.com/') RETURNING id`,
+      `INSERT INTO sources (
+        proposal_id, kind, original_url, canonical_url, moderation_status
+       ) VALUES ($1,'URL','https://example.com','https://example.com/','ACCEPTED') RETURNING id`,
       [proposal.rows[0]!.id],
     );
     for (let index = 0; index < 10; index += 1) {
@@ -88,9 +122,13 @@ describe("Phase 6 scoring and eligibility", () => {
         );
       }
     }
-    const result = await new ScoreService(database).recalculate(proposalId);
+    const [result, concurrent] = await Promise.all([
+      new ScoreService(database).recalculate(proposalId),
+      new ScoreService(database).recalculate(proposalId),
+    ]);
     expect(result.eligible).toBe(true);
     expect(result.proposalStatus).toBe("ELIGIBLE");
+    expect(concurrent.proposalStatus).toBe("ELIGIBLE");
     const state = await raw.query<{ jobs: number; auth: number; eligibility_events: number }>(`
       SELECT (SELECT count(*)::int FROM research_jobs) AS jobs,
         (SELECT count(*)::int FROM authorizations) AS auth,
@@ -98,5 +136,19 @@ describe("Phase 6 scoring and eligibility", () => {
           WHERE event_type = 'proposal_became_eligible') AS eligibility_events
     `);
     expect(state.rows[0]).toEqual({ jobs: 0, auth: 0, eligibility_events: 1 });
+
+    await raw.query("UPDATE evidence SET moderation_status = 'REJECTED'");
+    const lost = await new ScoreService(database).recalculate(proposalId);
+    expect(lost.eligible).toBe(false);
+    expect(lost.proposalStatus).toBe("COLLECTING");
+    const history = await raw.query<{ event_type: string }>(
+      `SELECT event_type FROM domain_events
+       WHERE event_type IN (
+         'threshold_reached', 'proposal_became_eligible', 'threshold_lost'
+       ) ORDER BY recorded_at, sequence`,
+    );
+    expect(history.rows.map((row) => row.event_type)).toEqual([
+      "threshold_reached", "proposal_became_eligible", "threshold_lost",
+    ]);
   });
 });

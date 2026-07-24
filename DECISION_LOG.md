@@ -416,3 +416,33 @@ propuesta no se considera aprobada hasta recibir confirmación humana.
 - Estado: IMPLEMENTADA; PENDIENTE DE APROBACIÓN HUMANA DE FASE 6
 - Decisión: `ELIGIBLE` registra que se cumplen umbrales, sin crear Authorization o ResearchJob.
 - Motivo: preservar la autoridad humana y evitar que una métrica active coste o IA.
+
+## D-050 — Activación interna e inmutable de políticas
+
+- Fecha: 2026-07-24
+- Estado: CORRECCIÓN DE AUDITORÍA; PENDIENTE DE APROBACIÓN HUMANA DE FASE 6
+- Decisión: registrar DRAFT y activar/retirar las cuatro dimensiones atómicamente por versión.
+- Motivo: impedir definiciones incompatibles y ambigüedad entre políticas activas.
+
+## D-051 — Solo aportaciones moderadas ACCEPTED
+
+- Fecha: 2026-07-24
+- Estado: CORRECCIÓN DE AUDITORÍA; PENDIENTE DE APROBACIÓN HUMANA DE FASE 6
+- Decisión: excluir PENDING y REJECTED de todas las entradas basadas en conocimiento.
+- Motivo: evitar manipulación; ACCEPTED expresa moderación, no validación epistemológica.
+
+## D-052 — Snapshot y transición atómicos
+
+- Fecha: 2026-07-24
+- Estado: CORRECCIÓN DE AUDITORÍA; PENDIENTE DE APROBACIÓN HUMANA DE FASE 6
+- Decisión: ligar scores, eventos de umbral/elegibilidad y Outbox a un `scoreRunId` inmutable
+  dentro de una transacción.
+- Motivo: reproducibilidad histórica y exactamente una transición bajo concurrencia.
+
+## D-053 — Elegibilidad reversible solo a COLLECTING
+
+- Fecha: 2026-07-24
+- Estado: CORRECCIÓN DE AUDITORÍA; PENDIENTE DE APROBACIÓN HUMANA DE FASE 6
+- Decisión: una Proposal ELIGIBLE que pierde umbral emite `threshold_lost` y vuelve a
+  COLLECTING; ningún otro estado se sobrescribe.
+- Motivo: reversión explícita sin invadir estados administrativos o terminales.

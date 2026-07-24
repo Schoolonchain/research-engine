@@ -7,14 +7,20 @@
 - `CONFIDENCE`: proporción de Evidence aceptada con penalización de contradicciones aceptadas.
 - `SUPPORT_COUNT`: contador absoluto independiente; no se presenta como probabilidad.
 
-Cada resultado conserva versión de política, entradas numéricas y explicación. El recálculo
-es idempotente para Proposal, dimensión y política.
+Cada resultado conserva versión de política, entradas numéricas y explicación en un
+`score_run` inmutable. Solo aportaciones moderadas `ACCEPTED` participan; esto no significa
+que sean conocimiento validado. Rejected y Pending quedan excluidas.
+
+Las políticas se registran como DRAFT mediante un servicio interno y se activan
+transaccionalmente, retirando la versión anterior. La definición y los umbrales quedan
+ligados a un fingerprint inmutable.
 
 ## Elegibilidad
 
 La política inicial exige simultáneamente mínimos de Priority, Progress, Confidence y apoyos.
-Cuando se cumplen, la Proposal pasa a `ELIGIBLE` y se registra
-`proposal_became_eligible`. Este estado:
+Cuando se cumplen, se registran `threshold_reached` y `proposal_became_eligible`. Si una
+Proposal `ELIGIBLE` deja de cumplirlos, emite `threshold_lost` y vuelve exclusivamente a
+`COLLECTING`. Todos comparten snapshot, correlación y transacción. Este estado:
 
 - no crea Authorization;
 - no crea ResearchJob;
