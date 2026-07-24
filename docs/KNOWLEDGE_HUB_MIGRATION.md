@@ -10,13 +10,13 @@ Objetivo: corregir los defectos de seguridad detectados en la auditoría y divid
 
 ### 1.1 Defectos de seguridad (bloqueantes)
 
-| # | Defecto | Ubicación | Acción |
-|---|---------|-----------|--------|
-| S-1 | 47 `innerHTML` con datos de Notion sin sanitizar (XSS almacenado) | JS completo | Reemplazar por `textContent` o sanitizador |
-| S-2 | Sin Content-Security-Policy | `<head>` | Añadir `<meta http-equiv="Content-Security-Policy">` |
-| S-3 | 51 `onclick` inline con datos dinámicos de Notion | JS completo | Migrar a `addEventListener` con clausuras |
-| S-4 | Workflow `sync-notion-preview.yml` hace push directo a main | `.github/workflows/` | Cambiar a PR o activar branch protection |
-| S-5 | Auto-descarga (`outerHTML` blob) persiste payloads XSS | Función de descarga | Eliminar o reconstruir desde datos |
+| # | Defecto | Estado | Commit |
+|---|---------|--------|--------|
+| S-1 | 47 `innerHTML` con datos de Notion sin sanitizar (XSS almacenado) | **Resuelto** | `f30fe69` + `2766755` + `ec648fc` |
+| S-2 | Sin Content-Security-Policy | **Resuelto** | `504be37` |
+| S-3 | 51 `onclick` inline — migrados a `addEventListener` delegation | **Resuelto** | `beada7e` |
+| S-4 | Workflow push directo a main — ahora usa `create-pull-request` | **Resuelto** | `9803335` |
+| S-5 | Auto-descarga `outerHTML` — ahora fetch del archivo original | **Resuelto** | `9803335` |
 
 S-1 y S-2 deben resolverse antes de publicar. S-3 a S-5 pueden ir en commits separados.
 
@@ -98,9 +98,9 @@ El sistema de integridad tiene dos secciones:
 - **Sección A — Anomalías automáticas**: `runIntegrityAudit()` detecta IDs duplicados, notionIds duplicados, URLs duplicadas, notionId ≠ hash de URL, entradas sin ID, entradas sin URL, campos estructurales inválidos, relaciones no resueltas.
 - **Sección B — Anomalías documentadas**: entries en DATA con campo `_dataIntegrityIssue` que representan conocimiento humano que la máquina no puede deducir.
 
-### 2.2 Sección C — Coherencia código-datos
+### 2.2 Sección C — Coherencia código-datos (**Implementado** — commit `edd6da2`)
 
-Nueva sección que detecta divergencias entre lo que el código asume y lo que los datos reales contienen.
+Detecta divergencias entre lo que el código asume y lo que los datos reales contienen.
 
 **C-1. Valores HTML estáticos vs. DATA**
 
