@@ -37,7 +37,7 @@ describe("initial database migration", () => {
   it("creates the complete Phase 1 schema and is idempotent", async () => {
     const migrations = await loadMigrations();
 
-    expect(migrations).toHaveLength(5);
+    expect(migrations).toHaveLength(6);
     await migrate(executor, migrations);
     await migrate(executor, migrations);
 
@@ -49,7 +49,7 @@ describe("initial database migration", () => {
     `);
 
     const tableNames = result.rows.map((row) => row.table_name);
-    expect(tableNames).toHaveLength(21);
+    expect(tableNames).toHaveLength(22);
     expect(tableNames).toEqual(
       expect.arrayContaining([
         "abuse_signals",
@@ -64,6 +64,7 @@ describe("initial database migration", () => {
         "outbox_messages",
         "participation_rate_limits",
         "participation_identity_migrations",
+        "participation_key_registry",
         "participation_subject_locks",
         "proposals",
         "research_jobs",
@@ -154,6 +155,13 @@ describe("initial database migration", () => {
     const proposalId = proposal.rows[0]?.id;
     const subjectHash = "a".repeat(64);
 
+    await database.query(
+      `
+        INSERT INTO participation_key_registry (key_id, key_verifier)
+        VALUES ('legacy-v1', $1)
+      `,
+      ["b".repeat(64)],
+    );
     await database.query(
       `
         INSERT INTO supports (

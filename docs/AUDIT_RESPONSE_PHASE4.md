@@ -1,7 +1,7 @@
 # Respuesta a auditoría — Fase 4
 
 Fecha: 2026-07-24  
-Estado: segunda ronda de correcciones implementada; pendiente de nueva auditoría
+Estado: tercera ronda de correcciones implementada; pendiente de nueva auditoría
 
 ## H-001 — Rotación HMAC
 
@@ -27,6 +27,15 @@ Prueba automatizada:
 
 El primer despliegue es deliberadamente de dos etapas: primero se publica soporte de keyring
 con la clave vigente; después se introduce una nueva primaria manteniendo la anterior.
+
+### Cierre adicional de ronda 2
+
+- `participation_key_registry` vincula cada ID a un verificador HMAC persistente.
+- El mismo ID con otro secreto bloquea `assertReady()` y todas las operaciones.
+- Un test reproduce la sustitución A→B bajo `legacy-v1` y confirma que el contador permanece
+  en uno.
+- `active_support_count` se mantiene por trigger al añadir, revocar o rehashear.
+- El guard normal consulta el registro acotado de claves, no escanea apoyos activos.
 
 ## M-004 — Ciclo de vida de locks
 
@@ -79,7 +88,7 @@ desplegable.
 
 ## Verificaciones disponibles
 
-- Suite local: pendiente de repetición tras esta segunda ronda correctiva.
+- Suite local: pendiente de repetición tras esta tercera ronda correctiva.
 - TypeScript estricto.
 - Build Node.js 24.
 - CI de PR #4 fue verificada previamente como aprobada; deberá ejecutarse nuevamente con el

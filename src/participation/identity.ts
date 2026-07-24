@@ -13,6 +13,11 @@ export interface ParticipationKeys {
   readonly globalKeyHash: string;
 }
 
+export interface ParticipationKeyDescriptor {
+  readonly id: string;
+  readonly verifier: string;
+}
+
 function validateOpaqueValue(
   value: string | undefined,
   label: string,
@@ -81,8 +86,19 @@ export class ParticipationKeyDeriver {
     });
   }
 
-  public keyIds(): readonly string[] {
-    return Object.freeze(this.versions.map((version) => version.id));
+  public keyDescriptors(): readonly ParticipationKeyDescriptor[] {
+    return Object.freeze(
+      this.versions.map((version) =>
+        Object.freeze({
+          id: version.id,
+          verifier: this.hash(
+            version.key,
+            "key-verifier",
+            "immutable-key-material",
+          ),
+        }),
+      ),
+    );
   }
 
   private hash(key: string, scope: string, value: string): string {

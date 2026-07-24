@@ -42,7 +42,11 @@ interface ExistingSupportRow extends SupportRow {
 }
 
 interface MissingKeyRow {
-  readonly subject_key_id: string;
+  readonly key_id: string;
+}
+
+interface RegisteredKeyRow {
+  readonly key_verifier: string;
 }
 
 const MAX_CONCURRENCY_RETRIES = 3;
@@ -307,28 +311,68 @@ export class SupportService {
   }
 
   public async assertReady(): Promise<void> {
-    const configuredIds = this.keys.keyIds();
-    const placeholders = hashPlaceholders(1, configuredIds.length);
-    const missing = await this.database.transaction((transaction) =>
-      transaction.query<MissingKeyRow>(
+    const configured = this.keys.keyDescriptors();
+    await this.database.transaction(async (transaction) => {
+      for (const key of configured) {
+        await transaction.query(
+          `
+            INSERT INTO participation_key_registry (
+              key_id, key_verifier, active_support_count
+            )
+            SELECT
+              $1::varchar(100),
+              $2::char(64),
+              count(*) FILTER (WHERE status = 'ACTIVE')
+            FROM supports
+            WHERE subject_key_id = $1::varchar(100)
+            ON CONFLICT (key_id) DO NOTHING
+          `,
+          [key.id, key.verifier],
+        );
+        const registered = await transaction.query<RegisteredKeyRow>(
+          `
+            SELECT key_verifier
+            FROM participation_key_registry
+            WHERE key_id = $1
+          `,
+          [key.id],
+        );
+        if (registered.rows[0]?.key_verifier !== key.verifier) {
+          throw new ParticipationConfigurationError(
+            `Participation key ID ${key.id} is bound to different key material`,
+          );
+        }
+        await transaction.query(
+          `
+            UPDATE participation_key_registry
+            SET last_verified_at = CURRENT_TIMESTAMP
+            WHERE key_id = $1
+          `,
+          [key.id],
+        );
+      }
+
+      const configuredIds = configured.map((key) => key.id);
+      const placeholders = hashPlaceholders(1, configuredIds.length);
+      const missing = await transaction.query<MissingKeyRow>(
         `
-          SELECT DISTINCT subject_key_id
-          FROM supports
+          SELECT key_id
+          FROM participation_key_registry
           WHERE
-            status = 'ACTIVE'
-            AND subject_key_id NOT IN (${placeholders})
-          ORDER BY subject_key_id
+            active_support_count > 0
+            AND key_id NOT IN (${placeholders})
+          ORDER BY key_id
         `,
         configuredIds,
-      ),
-    );
-    if (missing.rows.length > 0) {
-      throw new ParticipationConfigurationError(
-        `Participation keyring is missing active key IDs: ${missing.rows
-          .map((row) => row.subject_key_id)
-          .join(", ")}`,
       );
-    }
+      if (missing.rows.length > 0) {
+        throw new ParticipationConfigurationError(
+          `Participation keyring is missing active key IDs: ${missing.rows
+            .map((row) => row.key_id)
+            .join(", ")}`,
+        );
+      }
+    });
   }
 
   private normalizeExistingSupport(

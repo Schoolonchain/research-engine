@@ -190,7 +190,7 @@ Contadores consistentes y fraude limitado sin recopilar identidad innecesaria.
 - Límites versionables por sujeto, señal de red y globales.
 - Señales de abuso minimizadas con expiración.
 - Honeypot neutro; CAPTCHA adaptable desde el resolver de identidad.
-- 44 tests pasan; typecheck y build pasan.
+- 45 tests pasan; typecheck y build pasan.
 - Apoyar o revocar no crea Authorization ni ResearchJob.
 
 ### Gate

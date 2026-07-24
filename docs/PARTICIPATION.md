@@ -63,6 +63,13 @@ la activación y cada operación si falta cualquier `subject_key_id` usado por a
 La retirada solo es válida cuando esa comprobación pasa. Si una clave se compromete, exige
 revocar o reidentificar esas filas mediante un procedimiento extraordinario.
 
+`participation_key_registry` vincula cada ID con un verificador HMAC determinista. Reutilizar
+el mismo ID con un secreto distinto bloquea readiness y operaciones. Un trigger mantiene el
+número de apoyos activos por clave; por ello el guard consulta como máximo el registro de
+claves configuradas/registradas y no escanea todos los apoyos en cada solicitud. El primer
+readiness posterior a la migración registra cada clave existente y calcula una sola vez su
+contador inicial.
+
 Cada rehash queda registrado en `participation_identity_migrations` con el Support y los IDs
 de clave anterior/nueva. No genera evento de dominio ni Outbox porque no cambia la decisión
 del participante ni el contador; es mantenimiento de seguridad con auditoría restringida.

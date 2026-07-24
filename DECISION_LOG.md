@@ -322,3 +322,14 @@ propuesta no se considera aprobada hasta recibir confirmación humana.
 - Motivo: el rehash es mantenimiento de seguridad, no una mutación de la voluntad del
   participante, pero requiere trazabilidad operativa.
 - Consecuencia: la auditoría puede reconstruir rotaciones sin ampliar la retención pseudónima.
+
+## D-038 — Registro inmutable ID–verificador de clave
+
+- Fecha: 2026-07-24
+- Estado: CORRECCIÓN DE REAUDITORÍA; PENDIENTE DE APROBACIÓN HUMANA
+- Decisión: persistir un verificador HMAC por key ID y el contador transaccional de apoyos
+  activos asociado.
+- Motivo: impedir la sustitución silenciosa del secreto bajo el mismo ID y evitar escaneos
+  completos por solicitud.
+- Consecuencia: readiness enlaza claves nuevas una sola vez; cualquier verificador posterior
+  distinto bloquea activación y operaciones.

@@ -7,6 +7,7 @@ Fuentes ejecutables:
 - `migrations/0003_participation_controls.sql`
 - `migrations/0004_participation_key_rotation.sql`
 - `migrations/0005_participation_key_safety.sql`
+- `migrations/0006_participation_key_registry.sql`
 
 ## Agregados principales
 
@@ -97,7 +98,7 @@ CONFLICTING_EVIDENCE y CITATIONS separados en documentos JSON.
 
 Los tests ejecutan la migración sobre PostgreSQL embebido y comprueban:
 
-1. creación de las veintiuna tablas previstas;
+1. creación de las veintidós tablas previstas;
 2. segunda ejecución idempotente;
 3. relaciones separadas Source–Claim–Evidence;
 4. rechazo de apoyos activos duplicados;
@@ -149,6 +150,13 @@ locks vencidos. No se crea un lock hasta haber validado que la Proposal existe y
 Registro restringido de los cambios de `subject_key_id` efectuados por la migración perezosa.
 Conserva el Support afectado, IDs de clave anterior/nueva y timestamp, pero no guarda hashes
 anteriores ni identidad directa.
+
+### participation_key_registry
+
+Vincula de forma inmutable cada `key_id` con un verificador HMAC del material criptográfico y
+mantiene `active_support_count` mediante trigger. El readiness consulta este registro acotado,
+no la colección completa de apoyos. El verificador permite detectar reutilización accidental
+del ID sin persistir el secreto.
 
 ### abuse_signals
 

@@ -321,6 +321,21 @@ describe("Participation supports and anti-abuse", () => {
     expect(migrations.rows).toEqual([
       { from_key_id: "legacy-v1", to_key_id: "rotation-v2" },
     ]);
+
+    const usage = await database.query<{
+      key_id: string;
+      active_support_count: number;
+    }>(
+      `
+        SELECT key_id, active_support_count
+        FROM participation_key_registry
+        ORDER BY key_id
+      `,
+    );
+    expect(usage.rows).toEqual([
+      { key_id: "legacy-v1", active_support_count: 0 },
+      { key_id: "rotation-v2", active_support_count: 1 },
+    ]);
   });
 
   it("blocks premature retirement of a key used by active supports", async () => {
@@ -340,6 +355,38 @@ describe("Participation supports and anti-abuse", () => {
     );
     await expect(
       missingLegacyKey.add(participant, proposal.publicId),
+    ).rejects.toBeInstanceOf(ParticipationConfigurationError);
+
+    const state = await database.query<{
+      support_count: number;
+      active_rows: number;
+    }>(`
+      SELECT
+        (SELECT support_count FROM proposals) AS support_count,
+        (
+          SELECT count(*)::int FROM supports WHERE status = 'ACTIVE'
+        ) AS active_rows
+    `);
+    expect(state.rows[0]).toEqual({ support_count: 1, active_rows: 1 });
+  });
+
+  it("rejects different key material reused under an existing key ID", async () => {
+    const proposal = await openProposal("Immutable key identifiers");
+    const participant = identity("same-id-different-secret");
+    await supportService.add(participant, proposal.publicId);
+
+    const replacedSecret = new SupportService(transactionalDatabase, [
+      {
+        id: "legacy-v1",
+        key: "different-participation-key-32-bytes-minimum",
+      },
+    ]);
+
+    await expect(replacedSecret.assertReady()).rejects.toThrow(
+      "bound to different key material",
+    );
+    await expect(
+      replacedSecret.add(participant, proposal.publicId),
     ).rejects.toBeInstanceOf(ParticipationConfigurationError);
 
     const state = await database.query<{
