@@ -37,7 +37,7 @@ describe("initial database migration", () => {
   it("creates the complete Phase 1 schema and is idempotent", async () => {
     const migrations = await loadMigrations();
 
-    expect(migrations).toHaveLength(8);
+    expect(migrations).toHaveLength(9);
     await migrate(executor, migrations);
     await migrate(executor, migrations);
 

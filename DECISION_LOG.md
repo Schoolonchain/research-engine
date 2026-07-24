@@ -364,3 +364,26 @@ propuesta no se considera aprobada hasta recibir confirmación humana.
 - Estado: IMPLEMENTADA; PENDIENTE DE APROBACIÓN HUMANA DE FASE 5
 - Decisión: almacenar statement, excerpt y context como texto sin renderizado HTML.
 - Motivo: la sanitización de entrada no sustituye el escaping contextual del consumidor.
+
+## D-043 — IPv6 mediante allowlist global
+
+- Fecha: 2026-07-24
+- Estado: CORRECCIÓN DE REAUDITORÍA; PENDIENTE DE APROBACIÓN HUMANA DE FASE 5
+- Decisión: clasificar IPv4 e IPv6 por separado y permitir IPv6 solo en global unicast,
+  excluyendo prefijos especiales y de transición.
+- Motivo: una lista negativa incompleta permite SSRF y mezclar mapped IPv6 con IPv4 causa
+  falsos positivos.
+
+## D-044 — Reloj y retención de cuotas en PostgreSQL
+
+- Fecha: 2026-07-24
+- Estado: CORRECCIÓN DE REAUDITORÍA; PENDIENTE DE APROBACIÓN HUMANA DE FASE 5
+- Decisión: derivar ventanas y reintentos del reloj de base y purgar filas expiradas por lotes.
+- Motivo: todas las instancias necesitan ventanas comunes y almacenamiento acotado.
+
+## D-045 — Pertenencia a Proposal inmutable
+
+- Fecha: 2026-07-24
+- Estado: CORRECCIÓN DE REAUDITORÍA; PENDIENTE DE APROBACIÓN HUMANA DE FASE 5
+- Decisión: impedir cambios posteriores de `proposal_id` en Source y Claim.
+- Motivo: preservar permanentemente la integridad consumida por Evidence y futuros scores.

@@ -13,7 +13,9 @@ Solo se aceptan contribuciones para Proposals `OPEN` o `COLLECTING`. La identida
 un autenticador inyectado y nunca de IDs incluidos en el body.
 
 Cada escritura requiere `idempotencyKey` y está sujeta a contadores persistentes versionados
-por actor y globales. El agotamiento responde `429` con `Retry-After`.
+por actor y globales. Una clave repetida se rechaza como conflicto —no existe replay—. El
+agotamiento responde `429` con `Retry-After` calculado desde el final de ventana por PostgreSQL.
+Las operaciones purgan de forma acotada filas expiradas mediante un índice de retención.
 
 ## URL y deduplicación
 
@@ -48,4 +50,5 @@ futura deberá aplicar escaping contextual y no interpretar markup aportado.
 Los constructores Fastify existen para integración, pero no hay entrypoint desplegable.
 Cada mutación produce evento minimizado y Outbox atómico, sin copiar URL ni contenido.
 Triggers de base de datos impiden relaciones entre Proposals distintas y una restricción
-`NULLS NOT DISTINCT` evita Evidence duplicada aunque `locator` sea nulo.
+`NULLS NOT DISTINCT` evita Evidence duplicada aunque `locator` sea nulo. `proposal_id` es
+inmutable después de crear Source o Claim.

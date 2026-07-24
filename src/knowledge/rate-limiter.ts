@@ -22,42 +22,78 @@ export const DEFAULT_KNOWLEDGE_RATE_POLICY: KnowledgeRatePolicy = Object.freeze(
 
 interface CounterRow {
   readonly count: number;
-  readonly expires_at: Date;
+  readonly retry_after_seconds: number;
 }
 
 export class KnowledgeRateLimiter {
   public constructor(
     private readonly database: TransactionalDatabase,
     private readonly policy = DEFAULT_KNOWLEDGE_RATE_POLICY,
-  ) {}
+  ) {
+    const values = [
+      policy.version,
+      policy.windowSeconds,
+      policy.retentionSeconds,
+      policy.globalLimit,
+      ...Object.values(policy.actorLimits),
+    ];
+    if (values.some((value) => !Number.isSafeInteger(value) || value <= 0)) {
+      throw new Error("Knowledge rate policy values must be positive integers");
+    }
+    if (policy.retentionSeconds < policy.windowSeconds) {
+      throw new Error("Knowledge rate retention must cover the window");
+    }
+  }
 
   public async consume(action: KnowledgeAction, actorId: string): Promise<void> {
     const actorHash = createHash("sha256").update(`knowledge:actor:${actorId}`).digest("hex");
     const globalHash = createHash("sha256").update("knowledge:global").digest("hex");
-    const windowMs = this.policy.windowSeconds * 1000;
-    const started = new Date(Math.floor(Date.now() / windowMs) * windowMs);
-    const expires = new Date(started.getTime() + this.policy.retentionSeconds * 1000);
     await this.database.transaction(async (tx) => {
+      await tx.query(
+        `
+          DELETE FROM knowledge_rate_limits
+          WHERE ctid IN (
+            SELECT ctid FROM knowledge_rate_limits
+            WHERE expires_at < CURRENT_TIMESTAMP
+            ORDER BY expires_at
+            LIMIT 1000
+          )
+        `,
+      );
       for (const [scope, key, limit] of [
         ["ACTOR", actorHash, this.policy.actorLimits[action]],
         ["GLOBAL", globalHash, this.policy.globalLimit],
       ] as const) {
         const result = await tx.query<CounterRow>(
-          `
+          `WITH timing AS (
+            SELECT to_timestamp(
+              floor(extract(epoch FROM CURRENT_TIMESTAMP) / $5) * $5
+            ) AS window_started_at
+          )
             INSERT INTO knowledge_rate_limits (
               action, scope, key_hash, policy_version, window_started_at,
               count, limit_snapshot, expires_at
-            ) VALUES ($1,$2,$3,$4,$5,1,$6,$7)
+            )
+            SELECT $1,$2,$3,$4,timing.window_started_at,1,$6,
+              timing.window_started_at + ($7 * interval '1 second')
+            FROM timing
             ON CONFLICT (action, scope, key_hash, policy_version, window_started_at)
             DO UPDATE SET count = knowledge_rate_limits.count + 1
-            RETURNING count, expires_at
+            RETURNING count, GREATEST(
+              1,
+              ceil(extract(epoch FROM (
+                window_started_at + ($5 * interval '1 second') - CURRENT_TIMESTAMP
+              )))::int
+            ) AS retry_after_seconds
           `,
-          [action, scope, key, this.policy.version, started, limit, expires],
+          [
+            action, scope, key, this.policy.version,
+            this.policy.windowSeconds, limit, this.policy.retentionSeconds,
+          ],
         );
         const row = result.rows[0];
         if (row && row.count > limit) {
-          const retry = Math.max(1, Math.ceil((new Date(row.expires_at).getTime() - Date.now()) / 1000));
-          throw new KnowledgeRateLimitError(retry);
+          throw new KnowledgeRateLimitError(row.retry_after_seconds);
         }
       }
     });

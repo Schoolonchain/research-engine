@@ -3,19 +3,20 @@ import { BlockList, isIP } from "node:net";
 import { UnsafeSourceError } from "./errors.js";
 
 const BLOCKED_HOSTS = new Set(["localhost", "localhost.localdomain"]);
-const NON_GLOBAL = new BlockList();
+const NON_GLOBAL_V4 = new BlockList();
 for (const [network, prefix] of [
   ["0.0.0.0", 8], ["10.0.0.0", 8], ["100.64.0.0", 10],
   ["127.0.0.0", 8], ["169.254.0.0", 16], ["172.16.0.0", 12],
   ["192.0.0.0", 24], ["192.0.2.0", 24], ["192.88.99.0", 24],
   ["192.168.0.0", 16], ["198.18.0.0", 15], ["198.51.100.0", 24],
   ["203.0.113.0", 24], ["224.0.0.0", 4], ["240.0.0.0", 4],
-] as const) NON_GLOBAL.addSubnet(network, prefix, "ipv4");
+] as const) NON_GLOBAL_V4.addSubnet(network, prefix, "ipv4");
+const GLOBAL_V6 = new BlockList();
+GLOBAL_V6.addSubnet("2000::", 3, "ipv6");
+const NON_GLOBAL_V6 = new BlockList();
 for (const [network, prefix] of [
-  ["::", 128], ["::1", 128], ["100::", 64], ["2001:2::", 48],
-  ["::ffff:0:0", 96], ["2001:db8::", 32], ["fc00::", 7],
-  ["fe80::", 10], ["ff00::", 8],
-] as const) NON_GLOBAL.addSubnet(network, prefix, "ipv6");
+  ["2001:2::", 48], ["2001:db8::", 32], ["2002::", 16],
+] as const) NON_GLOBAL_V6.addSubnet(network, prefix, "ipv6");
 
 function defaultPort(protocol: string): string {
   return protocol === "https:" ? "443" : "80";
@@ -56,11 +57,13 @@ export function assertPublicAddress(address: string): void {
   const version = isIP(address);
   if (version === 0) throw new UnsafeSourceError("DNS returned an invalid IP");
   const normalized = address.toLowerCase();
-  const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/u.exec(normalized)?.[1];
-  if (
-    (mapped && (isIP(mapped) !== 4 || NON_GLOBAL.check(mapped, "ipv4"))) ||
-    NON_GLOBAL.check(normalized, version === 4 ? "ipv4" : "ipv6")
-  ) {
+  const blocked =
+    version === 4
+      ? NON_GLOBAL_V4.check(normalized, "ipv4")
+      : normalized.startsWith("::ffff:") ||
+        !GLOBAL_V6.check(normalized, "ipv6") ||
+        NON_GLOBAL_V6.check(normalized, "ipv6");
+  if (blocked) {
     throw new UnsafeSourceError("Source resolves to a non-public address");
   }
 }

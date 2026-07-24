@@ -10,6 +10,7 @@ Fuentes ejecutables:
 - `migrations/0006_participation_key_registry.sql`
 - `migrations/0007_participation_key_backfill_index.sql`
 - `migrations/0008_knowledge_integrity_controls.sql`
+- `migrations/0009_knowledge_retention_invariants.sql`
 
 ## Agregados principales
 

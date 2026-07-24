@@ -1,6 +1,6 @@
 # Respuesta a auditoría — Fase 5
 
-Estado: correcciones implementadas; pendiente de reauditoría.
+Estado: segunda ronda de correcciones implementada; pendiente de reauditoría.
 
 ## Hallazgos bloqueantes
 
@@ -25,3 +25,13 @@ formalmente bloqueado: no podrá activarse hasta demostrar pinning real a una IP
 timeout y límites de streaming en una auditoría específica.
 
 No se añadió IA, ResearchJob, pagos, score ni integración con Knowledge Hub.
+
+## Segunda ronda
+
+- Clasificación separada: IPv4 pública permitida; IPv6 limitada a global unicast y sin
+  prefijos mapped, transición, documentación o espacios no asignados.
+- Casos positivos confirman que el transporte se invoca con IPv4 e IPv6 públicas.
+- Reloj, ventana y `Retry-After` proceden de PostgreSQL.
+- Purga acotada de hasta 1.000 contadores expirados por operación, respaldada por índice.
+- Política de cuotas validada como enteros positivos y retención mayor o igual a ventana.
+- `proposal_id` es inmutable en Source y Claim mediante migración nueva.

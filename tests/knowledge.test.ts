@@ -156,10 +156,13 @@ describe("Phase 5 knowledge contributions", () => {
       idempotencyKey: "limited-source-1",
       url: "https://example.com/one",
     });
-    await expect(limited.addUrlSource(actor, proposalPublicId, {
-      idempotencyKey: "limited-source-2",
-      url: "https://example.com/two",
-    })).rejects.toBeInstanceOf(KnowledgeRateLimitError);
+    const failure = limited.addUrlSource(actor, proposalPublicId, {
+      idempotencyKey: "limited-source-2", url: "https://example.com/two",
+    });
+    await expect(failure).rejects.toBeInstanceOf(KnowledgeRateLimitError);
+    await failure.catch((error: unknown) => {
+      expect((error as KnowledgeRateLimitError).retryAfterSeconds).toBeLessThanOrEqual(60);
+    });
   });
 
   it("enforces evidence uniqueness and proposal relations in the database", async () => {
@@ -179,6 +182,31 @@ describe("Phase 5 knowledge contributions", () => {
       "INSERT INTO evidence (claim_id, source_id, stance) VALUES ($1,$2,'SUPPORTS')",
       [ids.rows[0]!.claim_id, ids.rows[0]!.source_id],
     )).rejects.toThrow();
+    await expect(raw.query(
+      "UPDATE sources SET proposal_id = gen_random_uuid() WHERE id = $1",
+      [ids.rows[0]!.source_id],
+    )).rejects.toThrow("immutable");
+  });
+
+  it("purges expired quota rows during bounded consumption", async () => {
+    await raw.query(`
+      INSERT INTO knowledge_rate_limits (
+        action, scope, key_hash, policy_version, window_started_at,
+        count, limit_snapshot, expires_at
+      ) VALUES (
+        'source_add', 'ACTOR', '${"f".repeat(64)}', 1,
+        CURRENT_TIMESTAMP - interval '2 hours', 1, 1,
+        CURRENT_TIMESTAMP - interval '1 hour'
+      )
+    `);
+    await knowledge.addUrlSource(actor, proposalPublicId, {
+      idempotencyKey: "purge-source-1",
+      url: "https://example.com/purge",
+    });
+    const expired = await raw.query<{ count: number }>(
+      "SELECT count(*)::int AS count FROM knowledge_rate_limits WHERE expires_at < CURRENT_TIMESTAMP",
+    );
+    expect(expired.rows[0]?.count).toBe(0);
   });
 });
 
@@ -238,6 +266,10 @@ describe("SSRF-resistant source fetch policy", () => {
     "198.18.0.1",
     "240.0.0.1",
     "2001:db8::1",
+    "fec0::1",
+    "64:ff9b:1::a00:1",
+    "2002:7f00:1::",
+    "4000::1",
   ])("rejects non-global address %s", async (address) => {
     const fetcher = new SafeSourceFetcher(
       { resolve: async () => [address] },
@@ -253,4 +285,22 @@ describe("SSRF-resistant source fetch policy", () => {
     );
     await expect(fetcher.fetch("https://example.com")).rejects.toBeInstanceOf(UnsafeSourceError);
   });
+
+  it.each(["8.8.8.8", "93.184.216.34", "2606:4700:4700::1111"])(
+    "allows globally routable address %s and invokes transport",
+    async (address) => {
+      let calls = 0;
+      const fetcher = new SafeSourceFetcher(
+        { resolve: async () => [address] },
+        { request: async () => {
+          calls += 1;
+          return { status: 200, contentType: "text/plain", body: new Uint8Array([1]) };
+        } },
+      );
+      await expect(fetcher.fetch("https://example.com")).resolves.toMatchObject({
+        contentType: "text/plain",
+      });
+      expect(calls).toBe(1);
+    },
+  );
 });
