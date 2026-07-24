@@ -60,6 +60,29 @@ class PGliteTransactionalDatabase implements TransactionalDatabase {
   }
 }
 
+class QueryCountingDatabase implements TransactionalDatabase {
+  public supportBackfillQueries = 0;
+
+  public constructor(private readonly database: TransactionalDatabase) {}
+
+  public transaction<Result>(
+    operation: (transaction: DatabaseExecutor) => Promise<Result>,
+  ): Promise<Result> {
+    return this.database.transaction((transaction) =>
+      operation({
+        query: <Row>(sql: string, values: readonly unknown[] = []) => {
+          if (
+            /FROM\s+supports\s+WHERE\s+subject_key_id\s*=/iu.test(sql)
+          ) {
+            this.supportBackfillQueries += 1;
+          }
+          return transaction.query<Row>(sql, values);
+        },
+      }),
+    );
+  }
+}
+
 async function actor(database: PGlite): Promise<ActorContext> {
   const result = await database.query<{ id: string }>(
     "INSERT INTO actors (kind) VALUES ('USER') RETURNING id",
@@ -400,6 +423,17 @@ describe("Participation supports and anti-abuse", () => {
         ) AS active_rows
     `);
     expect(state.rows[0]).toEqual({ support_count: 1, active_rows: 1 });
+  });
+
+  it("does not scan supports after a key ID has been registered", async () => {
+    const countedDatabase = new QueryCountingDatabase(transactionalDatabase);
+    const guarded = new SupportService(countedDatabase, KEYRING);
+
+    await guarded.assertReady();
+    expect(countedDatabase.supportBackfillQueries).toBe(1);
+
+    await guarded.assertReady();
+    expect(countedDatabase.supportBackfillQueries).toBe(1);
   });
 
   it("does not retain a subject lock for an unavailable proposal", async () => {

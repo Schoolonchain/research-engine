@@ -314,22 +314,7 @@ export class SupportService {
     const configured = this.keys.keyDescriptors();
     await this.database.transaction(async (transaction) => {
       for (const key of configured) {
-        await transaction.query(
-          `
-            INSERT INTO participation_key_registry (
-              key_id, key_verifier, active_support_count
-            )
-            SELECT
-              $1::varchar(100),
-              $2::char(64),
-              count(*) FILTER (WHERE status = 'ACTIVE')
-            FROM supports
-            WHERE subject_key_id = $1::varchar(100)
-            ON CONFLICT (key_id) DO NOTHING
-          `,
-          [key.id, key.verifier],
-        );
-        const registered = await transaction.query<RegisteredKeyRow>(
+        let registered = await transaction.query<RegisteredKeyRow>(
           `
             SELECT key_verifier
             FROM participation_key_registry
@@ -337,6 +322,31 @@ export class SupportService {
           `,
           [key.id],
         );
+        if (!registered.rows[0]) {
+          await transaction.query(
+            `
+              INSERT INTO participation_key_registry (
+                key_id, key_verifier, active_support_count
+              )
+              SELECT
+                $1::varchar(100),
+                $2::char(64),
+                count(*) FILTER (WHERE status = 'ACTIVE')
+              FROM supports
+              WHERE subject_key_id = $1::varchar(100)
+              ON CONFLICT (key_id) DO NOTHING
+            `,
+            [key.id, key.verifier],
+          );
+          registered = await transaction.query<RegisteredKeyRow>(
+            `
+              SELECT key_verifier
+              FROM participation_key_registry
+              WHERE key_id = $1
+            `,
+            [key.id],
+          );
+        }
         if (registered.rows[0]?.key_verifier !== key.verifier) {
           throw new ParticipationConfigurationError(
             `Participation key ID ${key.id} is bound to different key material`,

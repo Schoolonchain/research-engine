@@ -39,4 +39,3 @@ CREATE INDEX abuse_signals_lookup_idx
 
 CREATE INDEX supports_subject_history_idx
   ON supports (proposal_id, subject_key_hash, created_at DESC);
-

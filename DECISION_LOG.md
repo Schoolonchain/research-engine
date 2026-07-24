@@ -333,3 +333,13 @@ propuesta no se considera aprobada hasta recibir confirmación humana.
   completos por solicitud.
 - Consecuencia: readiness enlaza claves nuevas una sola vez; cualquier verificador posterior
   distinto bloquea activación y operaciones.
+
+## D-039 — Separar backfill y readiness ordinario
+
+- Fecha: 2026-07-24
+- Estado: CORRECCIÓN DE REAUDITORÍA; PENDIENTE DE APROBACIÓN HUMANA
+- Decisión: consultar primero el registro de claves y ejecutar el backfill indexado únicamente
+  cuando el ID todavía no exista.
+- Motivo: `ON CONFLICT` no evita evaluar el `count(*)` de su consulta fuente.
+- Consecuencia: cada ID puede requerir un único backfill; readiness posterior tiene coste
+  proporcional al número de claves, no al número de apoyos.

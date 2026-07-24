@@ -8,6 +8,7 @@ Fuentes ejecutables:
 - `migrations/0004_participation_key_rotation.sql`
 - `migrations/0005_participation_key_safety.sql`
 - `migrations/0006_participation_key_registry.sql`
+- `migrations/0007_participation_key_backfill_index.sql`
 
 ## Agregados principales
 
@@ -156,7 +157,8 @@ anteriores ni identidad directa.
 Vincula de forma inmutable cada `key_id` con un verificador HMAC del material criptográfico y
 mantiene `active_support_count` mediante trigger. El readiness consulta este registro acotado,
 no la colección completa de apoyos. El verificador permite detectar reutilización accidental
-del ID sin persistir el secreto.
+del ID sin persistir el secreto. El índice parcial `supports_active_subject_key_id_idx` limita
+el coste del backfill único de una clave todavía no registrada.
 
 ### abuse_signals
 

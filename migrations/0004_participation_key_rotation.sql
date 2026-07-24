@@ -26,4 +26,3 @@ ALTER TABLE participation_rate_limits
     policy_version,
     window_started_at
   );
-

@@ -1,6 +1,6 @@
 # Respuesta a auditoría — Fase 4
 
-Fecha: 2026-07-24  
+Fecha: 2026-07-24
 Estado: tercera ronda de correcciones implementada; pendiente de nueva auditoría
 
 ## H-001 — Rotación HMAC
@@ -36,6 +36,8 @@ con la clave vigente; después se introduce una nueva primaria manteniendo la an
   en uno.
 - `active_support_count` se mantiene por trigger al añadir, revocar o rehashear.
 - El guard normal consulta el registro acotado de claves, no escanea apoyos activos.
+- El backfill consulta `supports` solo si el ID no existe y usa un índice parcial; una prueba
+  instrumentada confirma que el segundo readiness realiza cero consultas a `supports`.
 
 ## M-004 — Ciclo de vida de locks
 
@@ -88,7 +90,7 @@ desplegable.
 
 ## Verificaciones disponibles
 
-- Suite local: pendiente de repetición tras esta tercera ronda correctiva.
+- Suite local: 5 archivos, 46/46 tests.
 - TypeScript estricto.
 - Build Node.js 24.
 - CI de PR #4 fue verificada previamente como aprobada; deberá ejecutarse nuevamente con el

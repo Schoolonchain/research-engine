@@ -68,7 +68,8 @@ el mismo ID con un secreto distinto bloquea readiness y operaciones. Un trigger 
 número de apoyos activos por clave; por ello el guard consulta como máximo el registro de
 claves configuradas/registradas y no escanea todos los apoyos en cada solicitud. El primer
 readiness posterior a la migración registra cada clave existente y calcula una sola vez su
-contador inicial.
+contador inicial mediante un índice parcial. Las comprobaciones posteriores consultan primero
+el registro y no vuelven a leer `supports`.
 
 Cada rehash queda registrado en `participation_identity_migrations` con el Support y los IDs
 de clave anterior/nueva. No genera evento de dominio ni Outbox porque no cambia la decisión
