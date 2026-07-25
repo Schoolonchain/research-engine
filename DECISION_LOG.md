@@ -484,3 +484,35 @@ propuesta no se considera aprobada hasta recibir confirmación humana.
 - Decisión: Evidence y contradicciones solo cuentan si Claim es efectivamente aceptable,
   incluida la Source asociada a Claim cuando exista.
 - Motivo: impedir que una Evidence aceptada rehabilite indirectamente un antecedente rechazado.
+
+## D-059 — Identidad administrativa federada e inyectada
+
+- Fecha: 2026-07-25
+- Estado: IMPLEMENTADA; PENDIENTE DE APROBACIÓN HUMANA DE FASE 7
+- Decisión: aceptar solo principals verificados por un adaptador IdP inyectado y
+  preaprovisionados; no recibir actor, rol ni MFA desde datos controlados por el cliente.
+- Motivo: preservar una frontera de confianza explícita sin acoplar el dominio a un proveedor.
+
+## D-060 — MFA, sesión acotada y CSRF independiente
+
+- Fecha: 2026-07-25
+- Estado: IMPLEMENTADA; PENDIENTE DE APROBACIÓN HUMANA DE FASE 7
+- Decisión: exigir MFA, persistir únicamente hashes de tokens, comprobar expiración/revocación
+  en base y exigir CSRF para mutaciones.
+- Motivo: reducir robo de sesión, replay y ataques cross-site sobre acciones críticas.
+
+## D-061 — Separación administrativa de funciones
+
+- Fecha: 2026-07-25
+- Estado: IMPLEMENTADA; PENDIENTE DE APROBACIÓN HUMANA DE FASE 7
+- Decisión: separar `MODERATOR`, `POLICY_ADMIN` y `VALIDATOR`; la activación exige además
+  reautenticación de menos de cinco minutos y revalidación transaccional.
+- Motivo: impedir escalada horizontal y proteger la identidad inmutable de las políticas.
+
+## D-062 — Administración no equivale a Authorization de ejecución
+
+- Fecha: 2026-07-25
+- Estado: IMPLEMENTADA; PENDIENTE DE APROBACIÓN HUMANA DE FASE 7
+- Decisión: la cola de elegibles es de solo lectura y ninguna acción de Fase 7 crea
+  Authorization, ResearchJob, cola de ejecución, presupuesto o IA.
+- Motivo: mantener intacto el gate humano y técnico de la Fase 8.

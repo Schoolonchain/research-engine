@@ -6,6 +6,7 @@ import { ProposalService } from "../src/proposals/proposal-service.js";
 import type { ActorContext } from "../src/proposals/model.js";
 import { ScoreService } from "../src/scoring/score-service.js";
 import { ScorePolicyManager } from "../src/scoring/policy-manager.js";
+import type { AdministrativeContext } from "../src/admin/model.js";
 
 class Executor implements DatabaseExecutor {
   public constructor(private readonly db: PGlite | Transaction) {}
@@ -25,6 +26,7 @@ describe("Phase 6 scoring and eligibility", () => {
   let raw: PGlite;
   let database: Database;
   let proposalId: string;
+  let policyAdmin: AdministrativeContext;
 
   beforeEach(async () => {
     raw = new PGlite();
@@ -43,7 +45,36 @@ describe("Phase 6 scoring and eligibility", () => {
       title: "Scored proposal", centralQuestion: "Is scoring reproducible?",
     });
     proposalId = (await proposals.open(actor, created.publicId, { expectedVersion: 1 })).publicId;
-    await new ScorePolicyManager(database).activate({
+    const adminActor = await raw.query<{ id: string }>(
+      "INSERT INTO actors (kind) VALUES ('ADMIN') RETURNING id",
+    );
+    const identity = await raw.query<{ id: string }>(
+      `INSERT INTO administrative_identities (actor_id, issuer, subject, role)
+       VALUES ($1,'https://idp.example','policy-admin','POLICY_ADMIN') RETURNING id`,
+      [adminActor.rows[0]!.id],
+    );
+    const session = await raw.query<{
+      id: string; authenticated_at: Date; reauthenticated_at: Date; expires_at: Date;
+    }>(
+      `INSERT INTO administrative_sessions (
+        identity_id, token_hash, csrf_hash, mfa_verified,
+        authenticated_at, reauthenticated_at, expires_at
+      ) VALUES ($1,$2,$3,true,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,
+        CURRENT_TIMESTAMP + INTERVAL '15 minutes')
+      RETURNING id, authenticated_at, reauthenticated_at, expires_at`,
+      [identity.rows[0]!.id, "a".repeat(64), "b".repeat(64)],
+    );
+    policyAdmin = Object.freeze({
+      actorId: adminActor.rows[0]!.id,
+      identityId: identity.rows[0]!.id,
+      sessionId: session.rows[0]!.id,
+      role: "POLICY_ADMIN",
+      mfaVerified: true,
+      authenticatedAt: session.rows[0]!.authenticated_at,
+      reauthenticatedAt: session.rows[0]!.reauthenticated_at,
+      expiresAt: session.rows[0]!.expires_at,
+    });
+    await new ScorePolicyManager(database).activate(policyAdmin, {
       version: 1,
       priorityThreshold: 0.55,
       progressThreshold: 0.3,
@@ -73,14 +104,14 @@ describe("Phase 6 scoring and eligibility", () => {
 
   it("keeps policy versions immutable and activates a new version atomically", async () => {
     const manager = new ScorePolicyManager(database);
-    await expect(manager.activate({
+    await expect(manager.activate(policyAdmin, {
       version: 1,
       priorityThreshold: 0,
       progressThreshold: 0,
       confidenceThreshold: 0,
       minimumSupports: 0,
     })).rejects.toThrow("immutable");
-    await manager.activate({
+    await manager.activate(policyAdmin, {
       version: 2,
       priorityThreshold: 0.6,
       progressThreshold: 0.4,

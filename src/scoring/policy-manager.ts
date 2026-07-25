@@ -3,6 +3,11 @@ import { createHash } from "node:crypto";
 import type { TransactionalDatabase } from "../db/database.js";
 import { EventStore } from "../events/event-store.js";
 import { randomUUID } from "node:crypto";
+import type { AdministrativeContext } from "../admin/model.js";
+import {
+  AdministrativeAuthorizationError,
+  AdministrativeReauthenticationRequiredError,
+} from "../admin/errors.js";
 import type { ScorePolicyConfig } from "./model.js";
 
 const DIMENSIONS = ["PRIORITY", "PROGRESS", "CONFIDENCE", "SUPPORT_COUNT"] as const;
@@ -66,9 +71,31 @@ export class ScorePolicyManager {
     this.events = new EventStore(database);
   }
 
-  public async activate(policy: ScorePolicyConfig): Promise<void> {
+  public async activate(
+    authority: AdministrativeContext,
+    policy: ScorePolicyConfig,
+  ): Promise<void> {
     validateScorePolicy(policy);
     await this.database.transaction(async (tx) => {
+      if (authority.role !== "POLICY_ADMIN" || !authority.mfaVerified) {
+        throw new AdministrativeAuthorizationError("Policy administration role required");
+      }
+      const verified = await tx.query<{ id: string }>(
+        `SELECT session.id
+         FROM administrative_sessions AS session
+         JOIN administrative_identities AS identity ON identity.id = session.identity_id
+         WHERE session.id = $1 AND identity.actor_id = $2
+           AND identity.role = 'POLICY_ADMIN' AND identity.status = 'ACTIVE'
+           AND session.mfa_verified = true AND session.revoked_at IS NULL
+           AND session.expires_at > CURRENT_TIMESTAMP
+           AND session.reauthenticated_at >= CURRENT_TIMESTAMP - INTERVAL '5 minutes'`,
+        [authority.sessionId, authority.actorId],
+      );
+      if (!verified.rows[0]) {
+        throw new AdministrativeReauthenticationRequiredError(
+          "Fresh administrative reauthentication is required",
+        );
+      }
       const fingerprints: Array<{ dimension: string; fingerprint: string }> = [];
       for (const dimension of DIMENSIONS) {
         const definition = { formula: FORMULAS[dimension] };
@@ -113,6 +140,19 @@ export class ScorePolicyManager {
         ) VALUES ($1,$2,$3,$4)`,
         [policy.version, previous.rows[0]?.version ?? null, correlationId, policySetHash],
       );
+      await tx.query(
+        `INSERT INTO administrative_action_audit (
+          actor_id, session_id, action, target_type, target_id,
+          correlation_id, details
+        ) VALUES ($1,$2,'score_policy_activated','SCORE_POLICY_ACTIVATION',
+          $3,$3,$4::jsonb)`,
+        [authority.actorId, authority.sessionId, correlationId,
+          JSON.stringify({
+            policyVersion: policy.version,
+            previousPolicyVersion: previous.rows[0]?.version ?? null,
+            policySetHash,
+          })],
+      );
       await this.events.appendMany(tx, [{
         eventId: randomUUID(),
         eventType: "score_policy_activated",
@@ -120,7 +160,7 @@ export class ScorePolicyManager {
         aggregateType: "score_policy_activation",
         aggregateId: correlationId,
         expectedSequence: 0,
-        actor: { type: "system" },
+        actor: { type: "policy_admin", id: authority.actorId },
         correlationId,
         payload: {
           policyVersion: policy.version,

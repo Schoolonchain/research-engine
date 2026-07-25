@@ -15,6 +15,7 @@ Fuentes ejecutables:
 - `migrations/0011_scoring_snapshots.sql`
 - `migrations/0012_scoring_integrity_guards.sql`
 - `migrations/0013_scoring_policy_identity.sql`
+- `migrations/0014_administrative_security.sql`
 
 ## Agregados principales
 

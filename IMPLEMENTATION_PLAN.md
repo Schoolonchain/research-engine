@@ -295,6 +295,21 @@ Proteger moderación, configuración y revisión humana.
 
 Acciones críticas requieren identidad fuerte, permiso explícito y quedan auditadas.
 
+### Resultado implementado
+
+- Identidad federada mediante verificador IdP inyectado y allowlist preaprovisionada.
+- MFA obligatorio; sesiones acotadas, revocables y almacenadas solo mediante hashes.
+- CSRF obligatorio en mutaciones y reautenticación reciente para activar políticas.
+- Roles separados `MODERATOR`, `POLICY_ADMIN` y `VALIDATOR`.
+- Moderación, activación, auditoría append-only, evento y Outbox transaccionales.
+- Cola de elegibles de solo lectura.
+- 86 tests pasan; typecheck y build pasan.
+- Cero Authorization, ResearchJob, cola de ejecución o IA creados por Fase 7.
+
+### Gate
+
+Orden explícita requerida: **“Fase 7 aprobada. Integra la PR y comienza con la Fase 8.”**
+
 ## Fase 8 — Autorizaciones y Research Jobs
 
 ### Objetivo
