@@ -15,10 +15,12 @@ Las políticas se registran como DRAFT mediante un servicio interno y se activan
 transaccionalmente, retirando la versión anterior. La definición y los umbrales quedan
 ligados a un fingerprint obligatorio, verificado también al consumir. En Fase 6, DRAFT es un
 estado técnico dentro de registro-y-activación atómicos, no una revisión humana separada.
-Cada activación genera evento y Outbox.
+Cada activación genera evento y Outbox. Las versiones no pueden borrarse ni registrarse de
+nuevo. Cada activación conserva un `policySetHash` del conjunto ordenado de las cuatro
+definiciones; la tabla de activaciones, los snapshots y los Scores históricos son append-only.
 
-Evidence participa únicamente si ella, su Claim y su Source están `ACCEPTED`. Una Claim sin
-Source puede participar por su propio estado. Snapshots y Scores históricos son append-only.
+Evidence participa únicamente si ella, su Claim, su propia Source y la Source asociada a su
+Claim están `ACCEPTED`. Una Claim sin Source puede participar por su propio estado.
 
 ## Elegibilidad
 

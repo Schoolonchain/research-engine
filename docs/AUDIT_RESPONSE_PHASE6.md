@@ -1,6 +1,12 @@
 # Respuesta a auditoría — Fase 6
 
-Estado: segunda ronda de correcciones implementada; pendiente de reauditoría.
+Estado: tercera ronda de correcciones implementada; pendiente de reauditoría.
+
+- `score_policies` bloquea `DELETE`; una versión no puede borrarse y reutilizarse.
+- `score_policy_activations` es append-only y comparte con su evento el `policySetHash`
+  criptográfico del conjunto de cuatro definiciones.
+- Evidence y contradicciones exigen el predicado efectivo completo de Claim, incluida la
+  Source asociada a Claim cuando exista.
 
 - Políticas inmutables mediante fingerprint; reutilizar versión incompatible falla.
 - Registro `DRAFT` y activación interna transaccional retiran la versión anterior.
@@ -16,6 +22,10 @@ Estado: segunda ronda de correcciones implementada; pendiente de reauditoría.
 - Support Count se valida antes de convertir bigint a number.
 
 No existen endpoints administrativos de políticas ni trabajo de Fase 7.
+
+Las migraciones `0011`–`0013` presuponen tablas de Fase 6 vacías: la fase aún no está
+integrada y se confirmó que no existen entornos persistentes. Si esa precondición cambiara,
+haría falta un backfill explícito antes de aplicar los `NOT NULL`.
 
 ## Segunda ronda
 

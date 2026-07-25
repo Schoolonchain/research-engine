@@ -33,6 +33,15 @@ export function scorePolicyFingerprint(
     .digest("hex");
 }
 
+export function scorePolicySetFingerprint(
+  fingerprints: readonly Readonly<{ dimension: string; fingerprint: string }>[],
+): string {
+  return createHash("sha256")
+    .update(canonical([...fingerprints].sort((left, right) =>
+      left.dimension.localeCompare(right.dimension))))
+    .digest("hex");
+}
+
 export function validateScorePolicy(policy: ScorePolicyConfig): void {
   if (!Number.isSafeInteger(policy.version) || policy.version < 1) {
     throw new Error("Score policy version must be a positive integer");
@@ -60,9 +69,11 @@ export class ScorePolicyManager {
   public async activate(policy: ScorePolicyConfig): Promise<void> {
     validateScorePolicy(policy);
     await this.database.transaction(async (tx) => {
+      const fingerprints: Array<{ dimension: string; fingerprint: string }> = [];
       for (const dimension of DIMENSIONS) {
         const definition = { formula: FORMULAS[dimension] };
         const fingerprint = scorePolicyFingerprint(definition, policy);
+        fingerprints.push({ dimension, fingerprint });
         const existing = await tx.query<{ definition_hash: string | null }>(
           "SELECT definition_hash FROM score_policies WHERE dimension = $1 AND version = $2",
           [dimension, policy.version],
@@ -83,6 +94,7 @@ export class ScorePolicyManager {
           );
         }
       }
+      const policySetHash = scorePolicySetFingerprint(fingerprints);
       const previous = await tx.query<{ version: number }>(
         "SELECT DISTINCT version FROM score_policies WHERE status = 'ACTIVE'",
       );
@@ -97,9 +109,9 @@ export class ScorePolicyManager {
       const correlationId = randomUUID();
       await tx.query(
         `INSERT INTO score_policy_activations (
-          policy_version, previous_policy_version, correlation_id
-        ) VALUES ($1,$2,$3)`,
-        [policy.version, previous.rows[0]?.version ?? null, correlationId],
+          policy_version, previous_policy_version, correlation_id, policy_set_hash
+        ) VALUES ($1,$2,$3,$4)`,
+        [policy.version, previous.rows[0]?.version ?? null, correlationId, policySetHash],
       );
       await this.events.appendMany(tx, [{
         eventId: randomUUID(),
@@ -113,6 +125,7 @@ export class ScorePolicyManager {
         payload: {
           policyVersion: policy.version,
           previousPolicyVersion: previous.rows[0]?.version ?? null,
+          policySetHash,
         },
       }]);
     });

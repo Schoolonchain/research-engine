@@ -266,7 +266,7 @@ Cada valor puede explicarse y reproducirse; elegibilidad no equivale a autorizac
 - Política y umbrales versionados con entradas y explicación persistidas.
 - Recálculo idempotente y valores normalizados.
 - Transición auditable a `ELIGIBLE`.
-- 79 tests pasan; typecheck y build pasan.
+- 80 tests pasan; typecheck y build pasan.
 - Score alto y elegibilidad no crean Authorization, ResearchJob ni ejecución.
 
 ### Gate

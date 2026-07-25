@@ -92,15 +92,23 @@ describe("Phase 6 scoring and eligibility", () => {
        WHERE status = 'ACTIVE' GROUP BY version`,
     );
     expect(active.rows).toEqual([{ version: 2, count: 4 }]);
-    const audit = await raw.query<{ activations: number; events: number; outbox: number }>(`
+    const audit = await raw.query<{
+      activations: number; events: number; outbox: number; matching_hashes: number;
+    }>(`
       SELECT (SELECT count(*)::int FROM score_policy_activations) AS activations,
         (SELECT count(*)::int FROM domain_events
           WHERE event_type = 'score_policy_activated') AS events,
         (SELECT count(*)::int FROM outbox_messages AS outbox
           JOIN domain_events AS event ON event.event_id = outbox.event_id
-          WHERE event.event_type = 'score_policy_activated') AS outbox
+          WHERE event.event_type = 'score_policy_activated') AS outbox,
+        (SELECT count(*)::int FROM score_policy_activations AS activation
+          JOIN domain_events AS event ON event.aggregate_id = activation.correlation_id
+          WHERE event.event_type = 'score_policy_activated'
+            AND event.payload->>'policySetHash' = activation.policy_set_hash) AS matching_hashes
     `);
-    expect(audit.rows[0]).toEqual({ activations: 2, events: 2, outbox: 2 });
+    expect(audit.rows[0]).toEqual({
+      activations: 2, events: 2, outbox: 2, matching_hashes: 2,
+    });
     expect((await new ScoreService(database).recalculate(proposalId))
       .dimensions.every((item) => item.policyVersion === 2)).toBe(true);
   });
@@ -169,6 +177,10 @@ describe("Phase 6 scoring and eligibility", () => {
        SET eligibility_definition = '{"version":1,"priorityThreshold":0,
          "progressThreshold":0,"confidenceThreshold":0,"minimumSupports":0}'::jsonb`,
     )).rejects.toThrow("immutable");
+    await expect(raw.query("DELETE FROM score_policies")).rejects.toThrow("append-only");
+    await expect(raw.query(
+      "UPDATE score_policy_activations SET previous_policy_version = 999",
+    )).rejects.toThrow("append-only");
     await expect(raw.query(
       "UPDATE score_runs SET eligible = NOT eligible",
     )).rejects.toThrow("append-only");
@@ -181,5 +193,46 @@ describe("Phase 6 scoring and eligibility", () => {
        VALUES ($1,$2,'PRIORITY',0)`,
       [ids.rows[0]!.proposal_id, ids.rows[0]!.policy_id],
     )).rejects.toThrow();
+  });
+
+  it("excludes Evidence whose Claim is linked to a rejected Source", async () => {
+    const proposal = await raw.query<{ id: string }>(
+      "UPDATE proposals SET support_count = 50 WHERE public_id = $1 RETURNING id",
+      [proposalId],
+    );
+    const rejectedSource = await raw.query<{ id: string }>(
+      `INSERT INTO sources (
+        proposal_id, kind, original_url, canonical_url, moderation_status
+      ) VALUES ($1,'URL','https://rejected.example','https://rejected.example/','REJECTED')
+      RETURNING id`,
+      [proposal.rows[0]!.id],
+    );
+    const acceptedSource = await raw.query<{ id: string }>(
+      `INSERT INTO sources (
+        proposal_id, kind, original_url, canonical_url, moderation_status
+      ) VALUES ($1,'URL','https://accepted.example','https://accepted.example/','ACCEPTED')
+      RETURNING id`,
+      [proposal.rows[0]!.id],
+    );
+    const claim = await raw.query<{ id: string }>(
+      `INSERT INTO claims (proposal_id, source_id, statement, moderation_status)
+       VALUES ($1,$2,'Rejected antecedent','ACCEPTED') RETURNING id`,
+      [proposal.rows[0]!.id, rejectedSource.rows[0]!.id],
+    );
+    for (let index = 0; index < 20; index += 1) {
+      await raw.query(
+        `INSERT INTO evidence (
+          claim_id, source_id, stance, locator, moderation_status
+        ) VALUES ($1,$2,'SUPPORTS',$3,'ACCEPTED')`,
+        [claim.rows[0]!.id, acceptedSource.rows[0]!.id, `Evidence ${index}`],
+      );
+    }
+
+    const result = await new ScoreService(database).recalculate(proposalId);
+    const run = await raw.query<{ inputs: { acceptedClaims: number; acceptedEvidence: number } }>(
+      "SELECT inputs FROM score_runs ORDER BY created_at DESC LIMIT 1",
+    );
+    expect(run.rows[0]!.inputs).toMatchObject({ acceptedClaims: 0, acceptedEvidence: 0 });
+    expect(result.eligible).toBe(false);
   });
 });

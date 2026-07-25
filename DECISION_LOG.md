@@ -468,3 +468,19 @@ propuesta no se considera aprobada hasta recibir confirmación humana.
 - Decisión: Evidence cuenta solo con ella, Claim y Source ACCEPTED; Claim con Source exige
   ambas ACCEPTED.
 - Motivo: evitar elegibilidad basada en antecedentes moderados como rechazados.
+
+## D-057 — Identidad permanente del conjunto de políticas
+
+- Fecha: 2026-07-25
+- Estado: SEGUNDA CORRECCIÓN DE REAUDITORÍA; PENDIENTE DE APROBACIÓN HUMANA DE FASE 6
+- Decisión: prohibir DELETE de versiones, hacer append-only cada activación y conservar el
+  mismo `policySetHash` en la activación y su evento.
+- Motivo: una versión no puede adquirir otro significado ni perder su prueba criptográfica.
+
+## D-058 — Predicado efectivo completo de Claim
+
+- Fecha: 2026-07-25
+- Estado: SEGUNDA CORRECCIÓN DE REAUDITORÍA; PENDIENTE DE APROBACIÓN HUMANA DE FASE 6
+- Decisión: Evidence y contradicciones solo cuentan si Claim es efectivamente aceptable,
+  incluida la Source asociada a Claim cuando exista.
+- Motivo: impedir que una Evidence aceptada rehabilite indirectamente un antecedente rechazado.

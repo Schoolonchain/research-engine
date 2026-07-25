@@ -109,6 +109,13 @@ export class ScoreService {
             count(DISTINCT evidence.id) FILTER (
               WHERE evidence.moderation_status = 'ACCEPTED'
                 AND claim.moderation_status = 'ACCEPTED'
+                AND (
+                  claim.source_id IS NULL OR EXISTS (
+                    SELECT 1 FROM sources AS claim_source
+                    WHERE claim_source.id = claim.source_id
+                      AND claim_source.moderation_status = 'ACCEPTED'
+                  )
+                )
                 AND EXISTS (
                   SELECT 1 FROM sources AS evidence_source
                   WHERE evidence_source.id = evidence.source_id
@@ -119,6 +126,13 @@ export class ScoreService {
               WHERE evidence.moderation_status = 'ACCEPTED'
                 AND evidence.stance = 'CONTRADICTS'
                 AND claim.moderation_status = 'ACCEPTED'
+                AND (
+                  claim.source_id IS NULL OR EXISTS (
+                    SELECT 1 FROM sources AS claim_source
+                    WHERE claim_source.id = claim.source_id
+                      AND claim_source.moderation_status = 'ACCEPTED'
+                  )
+                )
                 AND EXISTS (
                   SELECT 1 FROM sources AS evidence_source
                   WHERE evidence_source.id = evidence.source_id
