@@ -11,6 +11,10 @@ Fuentes ejecutables:
 - `migrations/0007_participation_key_backfill_index.sql`
 - `migrations/0008_knowledge_integrity_controls.sql`
 - `migrations/0009_knowledge_retention_invariants.sql`
+- `migrations/0010_score_policy_controls.sql`
+- `migrations/0011_scoring_snapshots.sql`
+- `migrations/0012_scoring_integrity_guards.sql`
+- `migrations/0013_scoring_policy_identity.sql`
 
 ## Agregados principales
 
@@ -168,6 +172,12 @@ Señales minimizadas y temporales generadas al exceder límites. No almacena IP,
 identidad directa.
 
 ## Límites deliberados
+
+`0013_scoring_policy_identity.sql` bloquea el borrado de versiones, hace append-only el
+historial de activaciones y exige su `policy_set_hash`. Junto con los `NOT NULL` de `0012`,
+presupone que las tablas nuevas de Fase 6 están vacías. La precondición es válida mientras la
+Fase 6 siga sin integrar y no existan entornos persistentes; un despliegue previo requeriría
+backfill.
 
 - Servicios de Proposal pertenecen a Fase 3.
 - Obtención segura de URLs pertenece a Fase 5.

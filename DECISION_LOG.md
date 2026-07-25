@@ -395,3 +395,92 @@ propuesta no se considera aprobada hasta recibir confirmación humana.
 - Decisión: mantener allowlist global unicast con exclusiones explícitas basadas en el
   registro especial de IANA, incluyendo `2001::/23` y `3fff::/20`.
 - Motivo: pertenecer a `2000::/3` no implica por sí solo enrutabilidad global.
+
+## D-047 — Dimensiones de score independientes
+
+- Fecha: 2026-07-24
+- Estado: IMPLEMENTADA; PENDIENTE DE APROBACIÓN HUMANA DE FASE 6
+- Decisión: persistir Priority, Progress, Confidence y Support Count por separado.
+- Motivo: apoyo, avance y confianza no son intercambiables ni deben ocultarse en un número.
+
+## D-048 — Fórmulas y umbrales versionados
+
+- Fecha: 2026-07-24
+- Estado: IMPLEMENTADA; PENDIENTE DE APROBACIÓN HUMANA DE FASE 6
+- Decisión: cada score conserva política, entradas y explicación reproducible.
+- Motivo: permitir auditoría y evolución sin reinterpretar resultados históricos.
+
+## D-049 — Elegibilidad sin ejecución
+
+- Fecha: 2026-07-24
+- Estado: IMPLEMENTADA; PENDIENTE DE APROBACIÓN HUMANA DE FASE 6
+- Decisión: `ELIGIBLE` registra que se cumplen umbrales, sin crear Authorization o ResearchJob.
+- Motivo: preservar la autoridad humana y evitar que una métrica active coste o IA.
+
+## D-050 — Activación interna e inmutable de políticas
+
+- Fecha: 2026-07-24
+- Estado: CORRECCIÓN DE AUDITORÍA; PENDIENTE DE APROBACIÓN HUMANA DE FASE 6
+- Decisión: registrar DRAFT y activar/retirar las cuatro dimensiones atómicamente por versión.
+- Motivo: impedir definiciones incompatibles y ambigüedad entre políticas activas.
+
+## D-051 — Solo aportaciones moderadas ACCEPTED
+
+- Fecha: 2026-07-24
+- Estado: CORRECCIÓN DE AUDITORÍA; PENDIENTE DE APROBACIÓN HUMANA DE FASE 6
+- Decisión: excluir PENDING y REJECTED de todas las entradas basadas en conocimiento.
+- Motivo: evitar manipulación; ACCEPTED expresa moderación, no validación epistemológica.
+
+## D-052 — Snapshot y transición atómicos
+
+- Fecha: 2026-07-24
+- Estado: CORRECCIÓN DE AUDITORÍA; PENDIENTE DE APROBACIÓN HUMANA DE FASE 6
+- Decisión: ligar scores, eventos de umbral/elegibilidad y Outbox a un `scoreRunId` inmutable
+  dentro de una transacción.
+- Motivo: reproducibilidad histórica y exactamente una transición bajo concurrencia.
+
+## D-053 — Elegibilidad reversible solo a COLLECTING
+
+- Fecha: 2026-07-24
+- Estado: CORRECCIÓN DE AUDITORÍA; PENDIENTE DE APROBACIÓN HUMANA DE FASE 6
+- Decisión: una Proposal ELIGIBLE que pierde umbral emite `threshold_lost` y vuelve a
+  COLLECTING; ningún otro estado se sobrescribe.
+- Motivo: reversión explícita sin invadir estados administrativos o terminales.
+
+## D-054 — Verificación de fingerprint en escritura y lectura
+
+- Fecha: 2026-07-25
+- Estado: CORRECCIÓN DE REAUDITORÍA; PENDIENTE DE APROBACIÓN HUMANA DE FASE 6
+- Decisión: hacer obligatorio e inmutable el fingerprint y recalcularlo al consumir políticas.
+- Motivo: impedir alteraciones directas de definición conservando un hash obsoleto.
+
+## D-055 — Historial de scoring append-only
+
+- Fecha: 2026-07-25
+- Estado: CORRECCIÓN DE REAUDITORÍA; PENDIENTE DE APROBACIÓN HUMANA DE FASE 6
+- Decisión: prohibir UPDATE/DELETE de score_runs y Scores; todo Score exige scoreRunId.
+- Motivo: preservar snapshots reproducibles y su vínculo obligatorio.
+
+## D-056 — Moderación coherente de la cadena
+
+- Fecha: 2026-07-25
+- Estado: CORRECCIÓN DE REAUDITORÍA; PENDIENTE DE APROBACIÓN HUMANA DE FASE 6
+- Decisión: Evidence cuenta solo con ella, Claim y Source ACCEPTED; Claim con Source exige
+  ambas ACCEPTED.
+- Motivo: evitar elegibilidad basada en antecedentes moderados como rechazados.
+
+## D-057 — Identidad permanente del conjunto de políticas
+
+- Fecha: 2026-07-25
+- Estado: SEGUNDA CORRECCIÓN DE REAUDITORÍA; PENDIENTE DE APROBACIÓN HUMANA DE FASE 6
+- Decisión: prohibir DELETE de versiones, hacer append-only cada activación y conservar el
+  mismo `policySetHash` en la activación y su evento.
+- Motivo: una versión no puede adquirir otro significado ni perder su prueba criptográfica.
+
+## D-058 — Predicado efectivo completo de Claim
+
+- Fecha: 2026-07-25
+- Estado: SEGUNDA CORRECCIÓN DE REAUDITORÍA; PENDIENTE DE APROBACIÓN HUMANA DE FASE 6
+- Decisión: Evidence y contradicciones solo cuentan si Claim es efectivamente aceptable,
+  incluida la Source asociada a Claim cuando exista.
+- Motivo: impedir que una Evidence aceptada rehabilite indirectamente un antecedente rechazado.

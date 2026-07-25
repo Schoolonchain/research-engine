@@ -6,7 +6,7 @@ Knowledge Hub.
 
 ## Estado
 
-**Fase 5 — Fuentes, afirmaciones y evidencias; pendiente de auditoría.**
+**Fase 6 — Score y elegibilidad; pendiente de auditoría.**
 
 El repositorio define constructores Fastify para Proposal, Participation y contribuciones de
 conocimiento, pero todavía no incluye un punto de entrada desplegable ni ejecuta investigación.

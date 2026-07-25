@@ -238,6 +238,8 @@ Orden explícita requerida: **“Fase 5 aprobada. Integra la PR y comienza con l
 
 ## Fase 6 — Score y elegibilidad
 
+**Estado: IMPLEMENTADA LOCALMENTE EL 2026-07-24; pendiente de auditoría y checkpoint humano.**
+
 ### Objetivo
 
 Calcular dimensiones explicables y determinar elegibilidad sin autorizar ejecución.
@@ -257,6 +259,19 @@ Calcular dimensiones explicables y determinar elegibilidad sin autorizar ejecuci
 ### Criterio de éxito
 
 Cada valor puede explicarse y reproducirse; elegibilidad no equivale a autorización.
+
+### Resultado verificado
+
+- Priority, Progress, Confidence y Support Count separados.
+- Política y umbrales versionados con entradas y explicación persistidas.
+- Recálculo idempotente y valores normalizados.
+- Transición auditable a `ELIGIBLE`.
+- 80 tests pasan; typecheck y build pasan.
+- Score alto y elegibilidad no crean Authorization, ResearchJob ni ejecución.
+
+### Gate
+
+Orden explícita requerida: **“Fase 6 aprobada. Integra la PR y comienza con la Fase 7.”**
 
 ## Fase 7 — Administración y validación
 

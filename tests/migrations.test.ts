@@ -37,7 +37,7 @@ describe("initial database migration", () => {
   it("creates the complete Phase 1 schema and is idempotent", async () => {
     const migrations = await loadMigrations();
 
-    expect(migrations).toHaveLength(9);
+    expect(migrations).toHaveLength(13);
     await migrate(executor, migrations);
     await migrate(executor, migrations);
 
@@ -49,7 +49,7 @@ describe("initial database migration", () => {
     `);
 
     const tableNames = result.rows.map((row) => row.table_name);
-    expect(tableNames).toHaveLength(23);
+    expect(tableNames).toHaveLength(25);
     expect(tableNames).toEqual(
       expect.arrayContaining([
         "abuse_signals",
@@ -73,6 +73,8 @@ describe("initial database migration", () => {
         "schema_migrations",
         "score_policies",
         "scores",
+        "score_runs",
+        "score_policy_activations",
         "sources",
         "supports",
       ]),
@@ -192,6 +194,13 @@ describe("initial database migration", () => {
       RETURNING id
     `);
     const proposalId = proposal.rows[0]?.id;
+    const run = await database.query<{ id: string }>(
+      `INSERT INTO score_runs (
+        proposal_id, policy_version, inputs, dimensions, eligible
+      ) VALUES ($1, 1, '{}', '{}', false) RETURNING id`,
+      [proposalId],
+    );
+    const runId = run.rows[0]?.id;
 
     for (const [version, dimension, value] of [
       [1, "PRIORITY", 0.75],
@@ -202,19 +211,19 @@ describe("initial database migration", () => {
       const policy = await database.query<{ id: string }>(
         `
           INSERT INTO score_policies (
-            dimension, version, name, definition
-          ) VALUES ($1, $2, $3, '{}')
+            dimension, version, name, definition, definition_hash
+          ) VALUES ($1, $2, $3, '{}', $4)
           RETURNING id
         `,
-        [dimension, version, `${dimension} v${version}`],
+        [dimension, version, `${dimension} v${version}`, "a".repeat(64)],
       );
       await database.query(
         `
           INSERT INTO scores (
-            proposal_id, policy_id, dimension, value
-          ) VALUES ($1, $2, $3, $4)
+            proposal_id, policy_id, score_run_id, dimension, value
+          ) VALUES ($1, $2, $3, $4, $5)
         `,
-        [proposalId, policy.rows[0]?.id, dimension, value],
+        [proposalId, policy.rows[0]?.id, runId, dimension, value],
       );
     }
 
