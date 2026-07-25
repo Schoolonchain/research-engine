@@ -38,9 +38,9 @@ El HTML contiene valores hardcodeados que se actualizan con JavaScript después 
 
 Solución: los elementos HTML nacen vacíos o con un placeholder de carga (`—`). Los conteos se calculan siempre desde DATA. `SYSTEM_STATE` se elimina o se genera automáticamente en `sync-notion.mjs`.
 
-### 1.3 Modularización
+### 1.3 Modularización (**Implementado** — commits `93361d7` a `cc58c6c`)
 
-Estructura propuesta, siguiendo las responsabilidades reales de la aplicación:
+Estructura final (implementada):
 
 ```
 index.html                  ← shell: <head> con CSP, sidebar, topbar, contenedores <div class="view">
@@ -63,25 +63,25 @@ js/
   boot.js                   ← bootKnowledgeHub(): fetch JSON, init, primer render
 ```
 
-Cada módulo usa `<script type="module">` con `import`/`export`. Sin bundler, sin npm, sin CDN.
+Cargados como `<script src>` en orden de dependencia. Sin bundler, sin npm, sin CDN.
+Conversión a `<script type="module">` con `import`/`export` pendiente como paso futuro.
 
-### 1.4 Orden de migración
+### 1.4 Orden de migración (**Completado**)
 
-Cada paso produce un commit funcional. Si algo se rompe, se revierte un solo módulo.
+| Paso | Descripción | Commit | Estado |
+|------|-------------|--------|--------|
+| 1 | `js/sanitize.js` — módulo + 32 tests | `f30fe69` | **Hecho** |
+| 2 | CSS → `tokens.css`, `layout.css`, `components.css`, `views.css` | `93361d7` | **Hecho** |
+| 3 | `js/data.js` — DB_META, AREA_META, AREA_MAP, SYSTEM_STATE, DATA | `db2a74e` | **Hecho** |
+| 4 | `js/state.js` — state, switchView, initCounts, navegación | `c6f048b` | **Hecho** |
+| 5-8 | Vistas + detail + charts + boot (8 archivos) | `cc58c6c` | **Hecho** |
+| 9 | `.gitignore` | `eb767e5` | **Hecho** |
 
-1. Crear `js/sanitize.js` — no depende de nada; se puede escribir y testear contra los datos actuales.
-2. Extraer `css/` — separar los tres bloques de CSS en archivos con `<link>`. Cambio visual cero.
-3. Extraer `js/data.js` — constantes puras sin dependencias.
-4. Extraer `js/state.js` — el corazón: objeto `state` y `switchView()`.
-5. Extraer vistas una por una: explore → intelligence → investigations → integrity → home. En cada extracción, reemplazar `innerHTML` por `textContent` + `sanitize` donde corresponda.
-6. Extraer `js/detail.js` y `js/charts.js`.
-7. Crear `js/boot.js` como punto de entrada que importa todo.
-8. Reducir `index.html` al shell con CSP y `<script type="module" src="js/boot.js">`.
-9. Añadir `.gitignore`.
+index.html reducido de 4 493 líneas a 607 líneas (shell HTML + sanitize inline).
 
 ### 1.5 Otros defectos menores
 
-- Sin `.gitignore` en el repositorio.
+- ~~Sin `.gitignore` en el repositorio.~~ **Resuelto** (`eb767e5`)
 - IDs de data sources de Notion expuestos en `config/notion-sources.json` (evaluar si el repo será público).
 - README.md de 2 líneas sin documentación de la arquitectura.
 
