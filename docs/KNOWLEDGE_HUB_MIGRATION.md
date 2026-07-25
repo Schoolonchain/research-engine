@@ -173,21 +173,47 @@ proposal → draft → active → paused → concluded → archived
 
 Esto no es casualidad — están diseñados para ser el mismo sistema. La diferencia es que hoy `transitionInv()` muta un array local, y con research-engine será un `POST /proposals/:id/open` real.
 
-### 3.3 Preparación en la modularización
+### 3.3 Capa de datos abstracta — **Implementado**
 
-Con ES modules implementados, la capa de datos está lista para abstracción a dos fuentes:
+Tres módulos en `js/data/` abstraen el origen de los datos:
 
 ```
-js/
-  data/
-    sources.js            ← registro de fuentes (Notion JSON hoy, API mañana)
-    content-store.js      ← carga, indexa y expone entradas de contenido
-    research-store.js     ← investigaciones y propuestas
+js/data/
+  sources.js            ← registro de fuentes (leaf module, zero imports)
+  content-store.js      ← loadContent() → setDATA()
+  research-store.js     ← loadInvestigations(), createInvestigation(), transitionInvestigation()
 ```
 
-- `content-store.js` abstrae `fetch('./data/content.json')`. Cuando research-engine tenga endpoint de contenido, se cambia la implementación sin tocar vistas.
-- `research-store.js` abstrae `fetch('./data/investigations.json')`. Cuando research-engine esté en producción, pasa a consumir la API REST. Las funciones `transitionInv()`, `saveProposalAsInvestigation()` dejan de mutar estado local y pasan a hacer llamadas HTTP.
-- Las vistas no saben de dónde vienen los datos.
+**Arquitectura:**
+
+- `data.js` sigue siendo el estado compartido — las vistas leen DATA/INVESTIGATIONS de ahí.
+- Los stores controlan **carga** y **mutación**. Las vistas no saben de dónde vienen los datos.
+- `boot.js` delega la carga a `loadContent()` + `loadInvestigations()` (ya no hace fetch directo).
+- `investigations.js` delega mutaciones a `createInvestigation()` y `transitionInvestigation()` del store.
+- La validación de UI (isDemo, INV_TRANSITIONS) permanece en `investigations.js`.
+
+**Para conectar research-engine solo hay que:**
+
+```js
+import { configureSource } from './data/sources.js';
+configureSource('investigations', { type: 'api', url: '/api/v1' });
+```
+
+Y añadir el case `api` en cada método del store. Cero cambios en vistas.
+
+**Grafo de dependencias actualizado (sin ciclos):**
+
+```
+sources.js (leaf)
+  │
+  ├──► content-store.js ──► data.js
+  │
+  └──► research-store.js ──► data.js
+         │
+         └──► investigations.js (mutaciones delegadas)
+
+boot.js ──► content-store.js + research-store.js (carga delegada)
+```
 
 ### 3.4 Qué NO cambia en Knowledge Hub cuando research-engine se integre
 
