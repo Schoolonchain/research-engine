@@ -4,6 +4,9 @@ export type NetworkStatus = (typeof NETWORK_STATUSES)[number];
 export const NETWORK_TYPES = ["MAINNET", "TESTNET"] as const;
 export type NetworkType = (typeof NETWORK_TYPES)[number];
 
+export const DATA_SOURCE_TYPES = ["API", "NODE", "EXPLORER"] as const;
+export type DataSourceType = (typeof DATA_SOURCE_TYPES)[number];
+
 export const COLLECTION_RUN_STATUSES = ["RUNNING", "COMPLETED", "FAILED", "PARTIAL"] as const;
 export type CollectionRunStatus = (typeof COLLECTION_RUN_STATUSES)[number];
 
@@ -15,13 +18,23 @@ export interface BlockchainNetwork {
   readonly name: string;
   readonly chainId: string;
   readonly networkType: NetworkType;
-  readonly rpcEndpoint: string;
   readonly status: NetworkStatus;
+}
+
+export interface BlockchainDataSource {
+  readonly id: string;
+  readonly networkId: string;
+  readonly sourceType: DataSourceType;
+  readonly name: string;
+  readonly endpoint: string;
+  readonly status: NetworkStatus;
+  readonly priority: number;
 }
 
 export interface BlockchainBlock {
   readonly id: string;
   readonly networkId: string;
+  readonly dataSourceId: string;
   readonly blockNumber: number;
   readonly blockHash: string;
   readonly parentHash: string;
@@ -36,6 +49,7 @@ export interface BlockchainBlock {
 export interface BlockchainTransaction {
   readonly id: string;
   readonly networkId: string;
+  readonly dataSourceId: string;
   readonly blockId: string;
   readonly txHash: string;
   readonly txType: string;

@@ -8,7 +8,7 @@ import type {
 } from "../src/db/database.js";
 import { loadMigrations, migrate } from "../src/db/migrations.js";
 import type { BlockchainConnector } from "../src/blockchain/connector.js";
-import type { RawBlock, RawTransaction } from "../src/blockchain/model.js";
+import type { DataSourceType, RawBlock, RawTransaction } from "../src/blockchain/model.js";
 import { BlockchainService } from "../src/blockchain/blockchain-service.js";
 import {
   BlockchainConflictError,
@@ -61,12 +61,27 @@ function makeBlock(overrides?: Partial<RawBlock>): RawBlock {
 }
 
 class StubConnector implements BlockchainConnector {
-  public readonly networkName = "TRON Mainnet";
-  public readonly sourceApi = "trongrid:stub";
+  public readonly networkName: string;
+  public readonly chainId: string;
+  public readonly sourceName: string;
+  public readonly sourceType: DataSourceType;
+  public readonly sourceEndpoint: string;
   public latestBlockNumber = 50_000_100;
   public blocks = new Map<number, RawBlock>();
 
-  public constructor() {
+  public constructor(overrides?: {
+    networkName?: string;
+    chainId?: string;
+    sourceName?: string;
+    sourceType?: DataSourceType;
+    sourceEndpoint?: string;
+  }) {
+    this.networkName = overrides?.networkName ?? "TRON Mainnet";
+    this.chainId = overrides?.chainId ?? "tron-mainnet";
+    this.sourceName = overrides?.sourceName ?? "TronGrid:stub";
+    this.sourceType = overrides?.sourceType ?? "API";
+    this.sourceEndpoint = overrides?.sourceEndpoint ?? "https://api.trongrid.io";
+
     this.blocks.set(50_000_000, makeBlock());
     this.blocks.set(50_000_001, makeBlock({
       blockNumber: 50_000_001,
@@ -117,12 +132,13 @@ describe("blockchain data collection", () => {
       SELECT table_name
       FROM information_schema.tables
       WHERE table_schema = 'public'
-        AND table_name LIKE 'blockchain_%' OR table_name = 'data_collection_runs'
+        AND (table_name LIKE 'blockchain_%' OR table_name = 'data_collection_runs')
       ORDER BY table_name
     `);
     const names = result.rows.map((row) => row.table_name);
     expect(names).toEqual(expect.arrayContaining([
       "blockchain_blocks",
+      "blockchain_data_sources",
       "blockchain_networks",
       "blockchain_transactions",
       "data_collection_runs",
@@ -140,6 +156,18 @@ describe("blockchain data collection", () => {
     expect(second.id).toBe(network.id);
   });
 
+  it("ensures a data source is created on first use", async () => {
+    const network = await service.ensureNetwork();
+    const dataSource = await service.ensureDataSource(network.id);
+    expect(dataSource.name).toBe("TronGrid:stub");
+    expect(dataSource.sourceType).toBe("API");
+    expect(dataSource.endpoint).toBe("https://api.trongrid.io");
+    expect(dataSource.status).toBe("ACTIVE");
+
+    const second = await service.ensureDataSource(network.id);
+    expect(second.id).toBe(dataSource.id);
+  });
+
   it("collects a block with transactions and records provenance", async () => {
     const result = await service.collectBlock(50_000_000);
 
@@ -149,18 +177,20 @@ describe("blockchain data collection", () => {
     );
     expect(result.block.witnessAddress).toBe("TWitnessAddr1234567");
     expect(result.block.txCount).toBe(1);
-    expect(result.block.collectionSource).toBe("trongrid:stub");
+    expect(result.block.collectionSource).toBe("TronGrid:stub");
+    expect(result.block.dataSourceId).toBeDefined();
 
     expect(result.transactions).toHaveLength(1);
     expect(result.transactions[0]!.txHash).toBe("abc123def456");
     expect(result.transactions[0]!.txType).toBe("TransferContract");
     expect(result.transactions[0]!.amountSun).toBe(BigInt(1_000_000));
     expect(result.transactions[0]!.result).toBe("SUCCESS");
+    expect(result.transactions[0]!.dataSourceId).toBe(result.block.dataSourceId);
 
     expect(result.collectionRun.status).toBe("COMPLETED");
     expect(result.collectionRun.blocksCollected).toBe(1);
     expect(result.collectionRun.txsCollected).toBe(1);
-    expect(result.collectionRun.sourceApi).toBe("trongrid:stub");
+    expect(result.collectionRun.sourceApi).toBe("TronGrid:stub");
   });
 
   it("collects a block with multiple transactions", async () => {
@@ -176,7 +206,7 @@ describe("blockchain data collection", () => {
     expect(result.collectionRun.txsCollected).toBe(2);
   });
 
-  it("rejects duplicate block collection", async () => {
+  it("rejects duplicate block collection from the same source", async () => {
     await service.collectBlock(50_000_000);
     await expect(service.collectBlock(50_000_000)).rejects.toBeInstanceOf(
       BlockchainConflictError,
@@ -210,6 +240,7 @@ describe("blockchain data collection", () => {
       networkName: "TRON Mainnet",
       blockNumber: 50_000_000,
       txCount: 1,
+      dataSourceName: "TronGrid:stub",
     });
   });
 
@@ -230,6 +261,15 @@ describe("blockchain data collection", () => {
     expect(found).not.toBeNull();
     expect(found!.blockNumber).toBe(50_000_000);
     expect(found!.blockHash).toBe(collected.block.blockHash);
+  });
+
+  it("retrieves a stored block filtering by data source", async () => {
+    const collected = await service.collectBlock(50_000_000);
+    const found = await service.getBlock(
+      collected.block.networkId, 50_000_000, collected.block.dataSourceId,
+    );
+    expect(found).not.toBeNull();
+    expect(found!.dataSourceId).toBe(collected.block.dataSourceId);
   });
 
   it("returns null for a block not yet collected", async () => {
@@ -293,35 +333,141 @@ describe("blockchain data collection", () => {
     expect(jobs.rows[0]!.count).toBe(0);
   });
 
-  it("enforces unique block per network constraint", async () => {
+  it("enforces unique block per network+source constraint", async () => {
     await service.collectBlock(50_000_000);
+
+    const dsRow = await raw.query<{ id: string }>(
+      "SELECT id FROM blockchain_data_sources LIMIT 1",
+    );
 
     await expect(
       raw.query(
         `INSERT INTO blockchain_blocks (
-          network_id, block_number, block_hash, parent_hash,
+          network_id, data_source_id, block_number, block_hash, parent_hash,
           block_timestamp, tx_count, raw_data, collection_source
-        ) SELECT id, 50000000, 'duplicate', 'parent', CURRENT_TIMESTAMP, 0, '{}', 'test'
-        FROM blockchain_networks LIMIT 1`,
+        ) SELECT n.id, $1, 50000000, 'duplicate', 'parent', CURRENT_TIMESTAMP, 0, '{}', 'test'
+        FROM blockchain_networks n LIMIT 1`,
+        [dsRow.rows[0]!.id],
       ),
     ).rejects.toThrow();
   });
 
-  it("enforces unique transaction hash per network constraint", async () => {
+  it("enforces unique transaction hash per network+source constraint", async () => {
     await service.collectBlock(50_000_000);
 
-    const blockRow = await raw.query<{ id: string; network_id: string }>(
-      "SELECT id, network_id FROM blockchain_blocks LIMIT 1",
+    const blockRow = await raw.query<{ id: string; network_id: string; data_source_id: string }>(
+      "SELECT id, network_id, data_source_id FROM blockchain_blocks LIMIT 1",
     );
     const block = blockRow.rows[0]!;
 
     await expect(
       raw.query(
         `INSERT INTO blockchain_transactions (
-          network_id, block_id, tx_hash, tx_type, raw_data
-        ) VALUES ($1, $2, 'abc123def456', 'Transfer', '{}')`,
-        [block.network_id, block.id],
+          network_id, data_source_id, block_id, tx_hash, tx_type, raw_data
+        ) VALUES ($1, $2, $3, 'abc123def456', 'Transfer', '{}')`,
+        [block.network_id, block.data_source_id, block.id],
       ),
     ).rejects.toThrow();
+  });
+
+  it("lists data sources for a network", async () => {
+    const network = await service.ensureNetwork();
+    await service.ensureDataSource(network.id);
+    const sources = await service.getDataSourcesForNetwork(network.id);
+    expect(sources).toHaveLength(1);
+    expect(sources[0]!.name).toBe("TronGrid:stub");
+  });
+
+  describe("multi-source coexistence", () => {
+    let connectorA: StubConnector;
+    let connectorB: StubConnector;
+    let serviceA: BlockchainService;
+    let serviceB: BlockchainService;
+
+    beforeEach(() => {
+      connectorA = new StubConnector({
+        sourceName: "TronGrid",
+        sourceEndpoint: "https://api.trongrid.io",
+      });
+      connectorB = new StubConnector({
+        sourceName: "DirectNode",
+        sourceType: "NODE",
+        sourceEndpoint: "grpc://tron-node.local:50051",
+      });
+      serviceA = new BlockchainService(database, connectorA);
+      serviceB = new BlockchainService(database, connectorB);
+    });
+
+    it("allows two sources to independently collect the same block", async () => {
+      const resultA = await serviceA.collectBlock(50_000_000);
+      const resultB = await serviceB.collectBlock(50_000_000);
+
+      expect(resultA.block.blockNumber).toBe(50_000_000);
+      expect(resultB.block.blockNumber).toBe(50_000_000);
+      expect(resultA.block.dataSourceId).not.toBe(resultB.block.dataSourceId);
+      expect(resultA.block.collectionSource).toBe("TronGrid");
+      expect(resultB.block.collectionSource).toBe("DirectNode");
+    });
+
+    it("returns all observations via getBlockObservations", async () => {
+      const resultA = await serviceA.collectBlock(50_000_000);
+      await serviceB.collectBlock(50_000_000);
+
+      const observations = await serviceA.getBlockObservations(
+        resultA.block.networkId, 50_000_000,
+      );
+      expect(observations).toHaveLength(2);
+      const sources = observations.map((b) => b.collectionSource).sort();
+      expect(sources).toEqual(["DirectNode", "TronGrid"]);
+    });
+
+    it("returns all transaction observations via getTransactionObservations", async () => {
+      const resultA = await serviceA.collectBlock(50_000_000);
+      await serviceB.collectBlock(50_000_000);
+
+      const observations = await serviceA.getTransactionObservations(
+        resultA.block.networkId, "abc123def456",
+      );
+      expect(observations).toHaveLength(2);
+      const sourceIds = new Set(observations.map((t) => t.dataSourceId));
+      expect(sourceIds.size).toBe(2);
+    });
+
+    it("shares the same network record across sources", async () => {
+      const networkA = await serviceA.ensureNetwork();
+      const networkB = await serviceB.ensureNetwork();
+      expect(networkA.id).toBe(networkB.id);
+    });
+
+    it("creates separate data source records per source", async () => {
+      const network = await serviceA.ensureNetwork();
+      const dsA = await serviceA.ensureDataSource(network.id);
+      const dsB = await serviceB.ensureDataSource(network.id);
+      expect(dsA.id).not.toBe(dsB.id);
+      expect(dsA.name).toBe("TronGrid");
+      expect(dsB.name).toBe("DirectNode");
+      expect(dsB.sourceType).toBe("NODE");
+    });
+
+    it("still rejects duplicate from the same source", async () => {
+      await serviceA.collectBlock(50_000_000);
+      await expect(serviceA.collectBlock(50_000_000)).rejects.toBeInstanceOf(
+        BlockchainConflictError,
+      );
+    });
+
+    it("records independent events per source collection", async () => {
+      await serviceA.collectBlock(50_000_000);
+      await serviceB.collectBlock(50_000_000);
+
+      const events = await raw.query<{
+        payload: Record<string, unknown>;
+      }>(
+        "SELECT payload FROM domain_events WHERE event_type = 'blockchain_block_collected' ORDER BY recorded_at",
+      );
+      expect(events.rows).toHaveLength(2);
+      expect(events.rows[0]!.payload).toMatchObject({ dataSourceName: "TronGrid" });
+      expect(events.rows[1]!.payload).toMatchObject({ dataSourceName: "DirectNode" });
+    });
   });
 });

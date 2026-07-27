@@ -5,15 +5,14 @@ import { EventStore, type AppendEventCommand } from "../events/event-store.js";
 import type { BlockchainConnector } from "./connector.js";
 import type {
   BlockchainBlock,
+  BlockchainDataSource,
   BlockchainNetwork,
   BlockchainTransaction,
   DataCollectionRun,
-  RawBlock,
   RawTransaction,
 } from "./model.js";
 import {
   BlockchainConflictError,
-  BlockchainNotFoundError,
   BlockchainValidationError,
 } from "./errors.js";
 
@@ -22,13 +21,23 @@ interface NetworkRow {
   readonly name: string;
   readonly chain_id: string;
   readonly network_type: string;
-  readonly rpc_endpoint: string;
   readonly status: string;
+}
+
+interface DataSourceRow {
+  readonly id: string;
+  readonly network_id: string;
+  readonly source_type: string;
+  readonly name: string;
+  readonly endpoint: string;
+  readonly status: string;
+  readonly priority: number;
 }
 
 interface BlockRow {
   readonly id: string;
   readonly network_id: string;
+  readonly data_source_id: string;
   readonly block_number: string;
   readonly block_hash: string;
   readonly parent_hash: string;
@@ -43,6 +52,7 @@ interface BlockRow {
 interface TransactionRow {
   readonly id: string;
   readonly network_id: string;
+  readonly data_source_id: string;
   readonly block_id: string;
   readonly tx_hash: string;
   readonly tx_type: string;
@@ -71,10 +81,33 @@ interface CollectionRunRow {
   readonly completed_at: Date | null;
 }
 
+function toNetwork(row: NetworkRow): BlockchainNetwork {
+  return Object.freeze({
+    id: row.id,
+    name: row.name,
+    chainId: row.chain_id,
+    networkType: row.network_type as BlockchainNetwork["networkType"],
+    status: row.status as BlockchainNetwork["status"],
+  });
+}
+
+function toDataSource(row: DataSourceRow): BlockchainDataSource {
+  return Object.freeze({
+    id: row.id,
+    networkId: row.network_id,
+    sourceType: row.source_type as BlockchainDataSource["sourceType"],
+    name: row.name,
+    endpoint: row.endpoint,
+    status: row.status as BlockchainDataSource["status"],
+    priority: row.priority,
+  });
+}
+
 function toBlock(row: BlockRow): BlockchainBlock {
   return Object.freeze({
     id: row.id,
     networkId: row.network_id,
+    dataSourceId: row.data_source_id,
     blockNumber: Number(row.block_number),
     blockHash: row.block_hash,
     parentHash: row.parent_hash,
@@ -91,6 +124,7 @@ function toTransaction(row: TransactionRow): BlockchainTransaction {
   return Object.freeze({
     id: row.id,
     networkId: row.network_id,
+    dataSourceId: row.data_source_id,
     blockId: row.block_id,
     txHash: row.tx_hash,
     txType: row.tx_type,
@@ -102,17 +136,6 @@ function toTransaction(row: TransactionRow): BlockchainTransaction {
     energyUsed: row.energy_used !== null ? BigInt(row.energy_used) : null,
     bandwidthUsed: row.bandwidth_used !== null ? BigInt(row.bandwidth_used) : null,
     collectedAt: row.collected_at,
-  });
-}
-
-function toNetwork(row: NetworkRow): BlockchainNetwork {
-  return Object.freeze({
-    id: row.id,
-    name: row.name,
-    chainId: row.chain_id,
-    networkType: row.network_type as BlockchainNetwork["networkType"],
-    rpcEndpoint: row.rpc_endpoint,
-    status: row.status as BlockchainNetwork["status"],
   });
 }
 
@@ -156,24 +179,44 @@ export class BlockchainService {
   public async ensureNetwork(): Promise<BlockchainNetwork> {
     return this.database.transaction(async (tx) => {
       const existing = await tx.query<NetworkRow>(
-        "SELECT * FROM blockchain_networks WHERE name = $1",
-        [this.connector.networkName],
+        "SELECT * FROM blockchain_networks WHERE chain_id = $1",
+        [this.connector.chainId],
       );
       if (existing.rows[0]) return toNetwork(existing.rows[0]);
 
       const inserted = await tx.query<NetworkRow>(
-        `INSERT INTO blockchain_networks (name, chain_id, network_type, rpc_endpoint)
-         VALUES ($1, $2, $3, $4)
-         ON CONFLICT (name) DO UPDATE SET updated_at = CURRENT_TIMESTAMP
+        `INSERT INTO blockchain_networks (name, chain_id, network_type)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (chain_id) DO UPDATE SET updated_at = CURRENT_TIMESTAMP
          RETURNING *`,
-        [
-          this.connector.networkName,
-          "tron-mainnet",
-          "MAINNET",
-          this.connector.sourceApi,
-        ],
+        [this.connector.networkName, this.connector.chainId, "MAINNET"],
       );
       return toNetwork(inserted.rows[0]!);
+    });
+  }
+
+  public async ensureDataSource(networkId: string): Promise<BlockchainDataSource> {
+    return this.database.transaction(async (tx) => {
+      const existing = await tx.query<DataSourceRow>(
+        "SELECT * FROM blockchain_data_sources WHERE network_id = $1 AND name = $2",
+        [networkId, this.connector.sourceName],
+      );
+      if (existing.rows[0]) return toDataSource(existing.rows[0]);
+
+      const inserted = await tx.query<DataSourceRow>(
+        `INSERT INTO blockchain_data_sources (
+          network_id, source_type, name, endpoint
+        ) VALUES ($1, $2, $3, $4)
+        ON CONFLICT (network_id, name) DO UPDATE SET updated_at = CURRENT_TIMESTAMP
+        RETURNING *`,
+        [
+          networkId,
+          this.connector.sourceType,
+          this.connector.sourceName,
+          this.connector.sourceEndpoint,
+        ],
+      );
+      return toDataSource(inserted.rows[0]!);
     });
   }
 
@@ -183,44 +226,48 @@ export class BlockchainService {
     }
 
     const network = await this.ensureNetwork();
+    const dataSource = await this.ensureDataSource(network.id);
     const rawBlock = await this.connector.getBlock(blockNumber);
 
     return this.database.transaction(async (tx) => {
       const duplicate = await tx.query<{ id: string }>(
-        "SELECT id FROM blockchain_blocks WHERE network_id = $1 AND block_number = $2",
-        [network.id, blockNumber],
+        `SELECT id FROM blockchain_blocks
+         WHERE network_id = $1 AND block_number = $2 AND data_source_id = $3`,
+        [network.id, blockNumber, dataSource.id],
       );
       if (duplicate.rows[0]) {
-        throw new BlockchainConflictError(`Block ${blockNumber} already collected`);
+        throw new BlockchainConflictError(
+          `Block ${blockNumber} already collected from ${this.connector.sourceName}`,
+        );
       }
 
       const runId = randomUUID();
-      const runResult = await tx.query<CollectionRunRow>(
+      await tx.query<CollectionRunRow>(
         `INSERT INTO data_collection_runs (
           id, network_id, run_type, status, source_api, block_start, block_end
         ) VALUES ($1, $2, 'BLOCK', 'RUNNING', $3, $4, $4)
         RETURNING *`,
-        [runId, network.id, this.connector.sourceApi, blockNumber],
+        [runId, network.id, this.connector.sourceName, blockNumber],
       );
 
       const blockId = randomUUID();
       const blockResult = await tx.query<BlockRow>(
         `INSERT INTO blockchain_blocks (
-          id, network_id, block_number, block_hash, parent_hash,
+          id, network_id, data_source_id, block_number, block_hash, parent_hash,
           block_timestamp, witness_address, tx_count, size_bytes,
           raw_data, collection_source
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11)
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12)
         RETURNING *`,
         [
-          blockId, network.id, rawBlock.blockNumber, rawBlock.blockHash,
-          rawBlock.parentHash, new Date(rawBlock.timestamp),
+          blockId, network.id, dataSource.id, rawBlock.blockNumber,
+          rawBlock.blockHash, rawBlock.parentHash, new Date(rawBlock.timestamp),
           rawBlock.witnessAddress, rawBlock.txCount, rawBlock.sizeBytes,
-          JSON.stringify(rawBlock.raw), this.connector.sourceApi,
+          JSON.stringify(rawBlock.raw), this.connector.sourceName,
         ],
       );
 
       const transactions = await this.insertTransactions(
-        tx, network.id, blockId, rawBlock.transactions,
+        tx, network.id, dataSource.id, blockId, rawBlock.transactions,
       );
 
       const completedRun = await tx.query<CollectionRunRow>(
@@ -244,9 +291,10 @@ export class BlockchainService {
         payload: {
           networkId: network.id,
           networkName: network.name,
+          dataSourceId: dataSource.id,
+          dataSourceName: dataSource.name,
           blockNumber: rawBlock.blockNumber,
           txCount: transactions.length,
-          sourceApi: this.connector.sourceApi,
         },
       };
       await this.events.appendMany(tx, [eventCommand]);
@@ -262,14 +310,39 @@ export class BlockchainService {
   public async getBlock(
     networkId: string,
     blockNumber: number,
+    dataSourceId?: string,
   ): Promise<BlockchainBlock | null> {
     const result = await this.database.transaction(async (tx) => {
+      if (dataSourceId) {
+        return tx.query<BlockRow>(
+          `SELECT * FROM blockchain_blocks
+           WHERE network_id = $1 AND block_number = $2 AND data_source_id = $3`,
+          [networkId, blockNumber, dataSourceId],
+        );
+      }
       return tx.query<BlockRow>(
-        "SELECT * FROM blockchain_blocks WHERE network_id = $1 AND block_number = $2",
+        `SELECT * FROM blockchain_blocks
+         WHERE network_id = $1 AND block_number = $2
+         ORDER BY collected_at ASC LIMIT 1`,
         [networkId, blockNumber],
       );
     });
     return result.rows[0] ? toBlock(result.rows[0]) : null;
+  }
+
+  public async getBlockObservations(
+    networkId: string,
+    blockNumber: number,
+  ): Promise<readonly BlockchainBlock[]> {
+    const result = await this.database.transaction(async (tx) => {
+      return tx.query<BlockRow>(
+        `SELECT * FROM blockchain_blocks
+         WHERE network_id = $1 AND block_number = $2
+         ORDER BY collected_at ASC`,
+        [networkId, blockNumber],
+      );
+    });
+    return Object.freeze(result.rows.map(toBlock));
   }
 
   public async getTransactionsByBlock(blockId: string): Promise<readonly BlockchainTransaction[]> {
@@ -277,6 +350,21 @@ export class BlockchainService {
       return tx.query<TransactionRow>(
         "SELECT * FROM blockchain_transactions WHERE block_id = $1 ORDER BY tx_hash",
         [blockId],
+      );
+    });
+    return Object.freeze(result.rows.map(toTransaction));
+  }
+
+  public async getTransactionObservations(
+    networkId: string,
+    txHash: string,
+  ): Promise<readonly BlockchainTransaction[]> {
+    const result = await this.database.transaction(async (tx) => {
+      return tx.query<TransactionRow>(
+        `SELECT * FROM blockchain_transactions
+         WHERE network_id = $1 AND tx_hash = $2
+         ORDER BY collected_at ASC`,
+        [networkId, txHash],
       );
     });
     return Object.freeze(result.rows.map(toTransaction));
@@ -296,9 +384,24 @@ export class BlockchainService {
     return result.rows[0] ? toCollectionRun(result.rows[0]) : null;
   }
 
+  public async getDataSourcesForNetwork(
+    networkId: string,
+  ): Promise<readonly BlockchainDataSource[]> {
+    const result = await this.database.transaction(async (tx) => {
+      return tx.query<DataSourceRow>(
+        `SELECT * FROM blockchain_data_sources
+         WHERE network_id = $1
+         ORDER BY priority DESC, created_at ASC`,
+        [networkId],
+      );
+    });
+    return Object.freeze(result.rows.map(toDataSource));
+  }
+
   private async insertTransactions(
     tx: DatabaseExecutor,
     networkId: string,
+    dataSourceId: string,
     blockId: string,
     rawTransactions: readonly RawTransaction[],
   ): Promise<BlockchainTransaction[]> {
@@ -308,13 +411,13 @@ export class BlockchainService {
       const txId = randomUUID();
       const result = await tx.query<TransactionRow>(
         `INSERT INTO blockchain_transactions (
-          id, network_id, block_id, tx_hash, tx_type,
+          id, network_id, data_source_id, block_id, tx_hash, tx_type,
           from_address, to_address, amount_sun, result,
           fee_sun, energy_used, bandwidth_used, raw_data
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb)
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb)
         RETURNING *`,
         [
-          txId, networkId, blockId, rawTx.txHash, rawTx.txType,
+          txId, networkId, dataSourceId, blockId, rawTx.txHash, rawTx.txType,
           rawTx.fromAddress, rawTx.toAddress,
           bigintToString(rawTx.amountSun), rawTx.result,
           bigintToString(rawTx.feeSun), bigintToString(rawTx.energyUsed),

@@ -1,11 +1,12 @@
 import type { BlockchainConnector } from "./connector.js";
-import type { RawBlock, RawTransaction } from "./model.js";
+import type { DataSourceType, RawBlock, RawTransaction } from "./model.js";
 import { BlockchainConnectionError, BlockchainNotFoundError } from "./errors.js";
 
 interface TronGridConfig {
   readonly endpoint: string;
   readonly apiKey?: string;
   readonly timeoutMs?: number;
+  readonly sourceName?: string;
 }
 
 interface TronBlockHeader {
@@ -91,7 +92,10 @@ function extractTransactions(
 
 export class TronGridConnector implements BlockchainConnector {
   public readonly networkName = "TRON Mainnet";
-  public readonly sourceApi: string;
+  public readonly chainId = "tron-mainnet";
+  public readonly sourceName: string;
+  public readonly sourceType: DataSourceType = "API";
+  public readonly sourceEndpoint: string;
 
   private readonly endpoint: string;
   private readonly apiKey: string | undefined;
@@ -101,7 +105,8 @@ export class TronGridConnector implements BlockchainConnector {
     this.endpoint = config.endpoint.replace(/\/+$/, "");
     this.apiKey = config.apiKey;
     this.timeoutMs = config.timeoutMs ?? 15_000;
-    this.sourceApi = `trongrid:${this.endpoint}`;
+    this.sourceName = config.sourceName ?? "TronGrid";
+    this.sourceEndpoint = this.endpoint;
   }
 
   public async getLatestBlockNumber(): Promise<number> {

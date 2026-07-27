@@ -16,6 +16,7 @@ Fuentes ejecutables:
 - `migrations/0012_scoring_integrity_guards.sql`
 - `migrations/0013_scoring_policy_identity.sql`
 - `migrations/0014_blockchain_data.sql`
+- `migrations/0015_blockchain_multi_source.sql`
 
 ## Agregados principales
 

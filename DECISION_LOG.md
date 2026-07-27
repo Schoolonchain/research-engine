@@ -521,3 +521,18 @@ propuesta no se considera aprobada hasta recibir confirmación humana.
   Cada recolección se registra en `data_collection_runs` con API, timestamps y contadores.
 - Motivo: trazabilidad y auditabilidad de la procedencia de los datos.
 - Consecuencia: se puede reconstruir cuándo, de dónde y cómo se obtuvo cada dato.
+
+## D-063 — Fuentes de datos blockchain como entidad independiente
+
+- Fecha: 2026-07-27
+- Estado: IMPLEMENTADA; PENDIENTE DE APROBACIÓN HUMANA
+- Decisión: crear `blockchain_data_sources` como tabla independiente con FK desde bloques y
+  transacciones. Cada observación queda vinculada a un `data_source_id` concreto. Las restricciones
+  UNIQUE incluyen `data_source_id`, permitiendo que dos fuentes registren el mismo bloque o
+  transacción de forma independiente.
+- Motivo: la arquitectura original (D-059) usaba `collection_source` como texto libre sin
+  integridad referencial, y UNIQUE(network_id, block_number) impedía que dos fuentes almacenasen
+  el mismo bloque. Esto bloqueaba la comparación multi-fuente y la auditoría cruzada.
+- Consecuencia: TronGrid y un nodo directo pueden coexistir, compararse y conservar procedencia
+  independiente. `getBlockObservations` y `getTransactionObservations` devuelven todas las
+  observaciones. Migración 0015 implementa el cambio.
