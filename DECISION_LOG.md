@@ -562,3 +562,19 @@ propuesta no se considera aprobada hasta recibir confirmación humana.
   vía HTTP, siguiendo el patrón establecido por `buildProposalApi()`.
 - Consecuencia: los campos BigInt de transacciones se serializan como strings en las respuestas
   JSON.
+
+## D-066 — TronScan como segunda fuente de datos blockchain
+
+- Fecha: 2026-07-27
+- Estado: IMPLEMENTADA; PENDIENTE DE APROBACIÓN HUMANA
+- Decisión: implementar `TronScanConnector` como segunda fuente de datos TRON, con sourceType
+  `EXPLORER`, para validar la arquitectura multi-fuente (D-063) con dos proveedores reales.
+  TronScan usa API REST con peticiones GET (vs POST de TronGrid), direcciones base58 (vs hex),
+  y una estructura de respuesta diferente.
+- Motivo: demostrar que la arquitectura soporta fuentes heterogéneas reales, no solo en teoría.
+  Dos fuentes independientes del mismo bloque permiten verificación cruzada y detección de
+  inconsistencias.
+- Consecuencia: las variables `TRONSCAN_API_KEY`, `TRONSCAN_ENDPOINT` y `TRONSCAN_TIMEOUT_MS`
+  se cargan opcionalmente igual que TronGrid. La clave API se envía en el header
+  `TRON-PRO-API-KEY`, nunca en la URL ni en mensajes de error. El script
+  `scripts/compare-sources.ts` permite comparar ambas fuentes en tiempo real.

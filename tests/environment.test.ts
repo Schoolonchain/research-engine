@@ -130,5 +130,85 @@ describe("environment", () => {
     expect(Object.isFrozen(environment)).toBe(true);
     expect(Object.isFrozen(environment.trongrid)).toBe(true);
   });
+
+  it("sets tronscan to null when no TRONSCAN env vars are present", () => {
+    const environment = loadEnvironment(validEnvironment);
+    expect(environment.tronscan).toBeNull();
+  });
+
+  it("loads tronscan config when TRONSCAN_API_KEY is set", () => {
+    const environment = loadEnvironment({
+      ...validEnvironment,
+      TRONSCAN_API_KEY: "test-scan-key",
+    });
+
+    expect(environment.tronscan).not.toBeNull();
+    expect(environment.tronscan!.apiKey).toBe("test-scan-key");
+    expect(environment.tronscan!.endpoint).toBe("https://apilist.tronscanapi.com");
+    expect(environment.tronscan!.timeoutMs).toBe(15_000);
+  });
+
+  it("loads tronscan config with custom endpoint", () => {
+    const environment = loadEnvironment({
+      ...validEnvironment,
+      TRONSCAN_ENDPOINT: "https://custom-scan.example.com",
+    });
+
+    expect(environment.tronscan).not.toBeNull();
+    expect(environment.tronscan!.endpoint).toBe("https://custom-scan.example.com");
+    expect(environment.tronscan!.apiKey).toBeUndefined();
+  });
+
+  it("loads tronscan config with custom timeout", () => {
+    const environment = loadEnvironment({
+      ...validEnvironment,
+      TRONSCAN_API_KEY: "key",
+      TRONSCAN_TIMEOUT_MS: "20000",
+    });
+
+    expect(environment.tronscan!.timeoutMs).toBe(20_000);
+  });
+
+  it("rejects invalid TRONSCAN_ENDPOINT URL", () => {
+    expect(() =>
+      loadEnvironment({
+        ...validEnvironment,
+        TRONSCAN_ENDPOINT: "not-a-url",
+      }),
+    ).toThrow("TRONSCAN_ENDPOINT must be a valid URL");
+  });
+
+  it("rejects invalid TRONSCAN_TIMEOUT_MS", () => {
+    expect(() =>
+      loadEnvironment({
+        ...validEnvironment,
+        TRONSCAN_API_KEY: "key",
+        TRONSCAN_TIMEOUT_MS: "-5",
+      }),
+    ).toThrow("TRONSCAN_TIMEOUT_MS must be a positive integer");
+  });
+
+  it("freezes tronscan config to prevent mutation", () => {
+    const environment = loadEnvironment({
+      ...validEnvironment,
+      TRONSCAN_API_KEY: "test-key",
+    });
+
+    expect(Object.isFrozen(environment)).toBe(true);
+    expect(Object.isFrozen(environment.tronscan)).toBe(true);
+  });
+
+  it("loads both trongrid and tronscan independently", () => {
+    const environment = loadEnvironment({
+      ...validEnvironment,
+      TRONGRID_API_KEY: "grid-key",
+      TRONSCAN_API_KEY: "scan-key",
+    });
+
+    expect(environment.trongrid).not.toBeNull();
+    expect(environment.tronscan).not.toBeNull();
+    expect(environment.trongrid!.apiKey).toBe("grid-key");
+    expect(environment.tronscan!.apiKey).toBe("scan-key");
+  });
 });
 
