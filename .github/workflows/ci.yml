@@ -42,6 +42,14 @@ jobs:
 
       - name: Test
         run: pnpm test
+        env:
+          TRONGRID_API_KEY: ${{ secrets.TRONGRID_API_KEY }}
+
+      - name: TRON integration demo
+        if: env.TRONGRID_API_KEY != ''
+        run: npx tsx scripts/test-tron-real.ts
+        env:
+          TRONGRID_API_KEY: ${{ secrets.TRONGRID_API_KEY }}
 
       - name: Build
         run: pnpm build
