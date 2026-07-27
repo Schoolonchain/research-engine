@@ -15,6 +15,16 @@ import {
   BlockchainValidationError,
 } from "./errors.js";
 
+const MAX_RAW_DATA_BYTES = 1_048_576;
+
+function assertRawDataSize(json: string, label: string): void {
+  if (json.length > MAX_RAW_DATA_BYTES) {
+    throw new BlockchainValidationError(
+      `${label} raw_data exceeds ${MAX_RAW_DATA_BYTES} byte limit (${json.length} bytes)`,
+    );
+  }
+}
+
 interface NetworkRow {
   readonly id: string;
   readonly name: string;
@@ -248,6 +258,9 @@ export class BlockchainService {
       );
 
       const blockId = randomUUID();
+      const blockRawJson = JSON.stringify(rawBlock.raw);
+      assertRawDataSize(blockRawJson, `Block ${blockNumber}`);
+
       const blockResult = await tx.query<BlockRow>(
         `INSERT INTO blockchain_blocks (
           id, network_id, data_source_id, block_number, block_hash, parent_hash,
@@ -259,7 +272,7 @@ export class BlockchainService {
           blockId, network.id, dataSource.id, rawBlock.blockNumber,
           rawBlock.blockHash, rawBlock.parentHash, new Date(rawBlock.timestamp),
           rawBlock.blockProducer, rawBlock.txCount, rawBlock.sizeBytes,
-          JSON.stringify(rawBlock.raw), this.connector.sourceName,
+          blockRawJson, this.connector.sourceName,
         ],
       );
 
@@ -406,6 +419,9 @@ export class BlockchainService {
     for (const rawTx of rawTransactions) {
       if (!rawTx.txHash) continue;
       const txId = randomUUID();
+      const txRawJson = JSON.stringify(rawTx.raw);
+      assertRawDataSize(txRawJson, `Transaction ${rawTx.txHash}`);
+
       const result = await tx.query<TransactionRow>(
         `INSERT INTO blockchain_transactions (
           id, network_id, data_source_id, block_id, tx_hash, tx_type,
@@ -418,7 +434,7 @@ export class BlockchainService {
           rawTx.fromAddress, rawTx.toAddress,
           rawTx.amount, rawTx.fee,
           rawTx.amountUnit, rawTx.feeUnit, rawTx.result,
-          JSON.stringify(rawTx.chainData), JSON.stringify(rawTx.raw),
+          JSON.stringify(rawTx.chainData), txRawJson,
         ],
       );
       results.push(toTransaction(result.rows[0]!));

@@ -1,6 +1,6 @@
 import type { BlockchainConnector } from "./connector.js";
 import type { DataSourceType, RawBlock, RawTransaction } from "./model.js";
-import { BlockchainConnectionError, BlockchainNotFoundError } from "./errors.js";
+import { BlockchainConnectionError, BlockchainNotFoundError, assertSafeEndpoint } from "./errors.js";
 
 interface TronscanConfig {
   readonly endpoint: string;
@@ -105,6 +105,7 @@ export class TronScanConnector implements BlockchainConnector {
   private readonly timeoutMs: number;
 
   public constructor(config: TronscanConfig) {
+    assertSafeEndpoint(config.endpoint);
     this.endpoint = config.endpoint.replace(/\/+$/, "");
     this.apiKey = config.apiKey;
     this.timeoutMs = config.timeoutMs ?? 15_000;

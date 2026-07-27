@@ -69,9 +69,9 @@ afterAll(async () => {
   await new Promise<void>((resolve) => server.close(() => resolve()));
 });
 
-function connector(opts?: { apiKey?: string; timeoutMs?: number }): TronScanConnector {
+function connector(opts?: { endpoint?: string; apiKey?: string; timeoutMs?: number }): TronScanConnector {
   const config: { endpoint: string; apiKey?: string; timeoutMs?: number } = {
-    endpoint: `http://127.0.0.1:${port}`,
+    endpoint: opts?.endpoint ?? `http://127.0.0.1:${port}`,
   };
   if (opts?.apiKey !== undefined) config.apiKey = opts.apiKey;
   if (opts?.timeoutMs !== undefined) config.timeoutMs = opts.timeoutMs;
@@ -351,6 +351,19 @@ describe("TronScanConnector", () => {
       const c = connector();
       expect(c.chainId).toBe("tron-mainnet");
       expect(c.networkName).toBe("TRON Mainnet");
+    });
+
+    it("rejects HTTP endpoints for non-loopback hosts", () => {
+      expect(() => connector({ endpoint: "http://evil.com" })).toThrow("HTTPS");
+    });
+
+    it("rejects hosts not in the allowlist", () => {
+      expect(() => connector({ endpoint: "https://evil.com" })).toThrow("not in the allowlist");
+    });
+
+    it("accepts valid TronScan endpoint", () => {
+      const c = connector({ endpoint: "https://apilist.tronscanapi.com" });
+      expect(c.sourceEndpoint).toBe("https://apilist.tronscanapi.com");
     });
   });
 });

@@ -1,6 +1,6 @@
 import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 
-import type { BlockchainTransaction } from "./model.js";
+import type { BlockchainBlock, BlockchainDataSource, BlockchainTransaction } from "./model.js";
 import type { BlockchainService, CollectBlockResult } from "./blockchain-service.js";
 import {
   BlockchainConflictError,
@@ -11,6 +11,23 @@ import {
 
 export interface BlockchainApiDependencies {
   readonly blockchain: BlockchainService;
+}
+
+function serializeBlock(block: BlockchainBlock): Record<string, unknown> {
+  return {
+    id: block.id,
+    networkId: block.networkId,
+    dataSourceId: block.dataSourceId,
+    blockNumber: block.blockNumber,
+    blockHash: block.blockHash,
+    parentHash: block.parentHash,
+    blockTimestamp: block.blockTimestamp,
+    blockProducer: block.blockProducer,
+    txCount: block.txCount,
+    sizeBytes: block.sizeBytes,
+    collectionSource: block.collectionSource,
+    collectedAt: block.collectedAt,
+  };
 }
 
 function serializeTransaction(tx: BlockchainTransaction): Record<string, unknown> {
@@ -33,9 +50,20 @@ function serializeTransaction(tx: BlockchainTransaction): Record<string, unknown
   };
 }
 
+function serializeDataSource(ds: BlockchainDataSource): Record<string, unknown> {
+  return {
+    id: ds.id,
+    networkId: ds.networkId,
+    sourceType: ds.sourceType,
+    name: ds.name,
+    status: ds.status,
+    priority: ds.priority,
+  };
+}
+
 function serializeCollectResult(result: CollectBlockResult): Record<string, unknown> {
   return {
-    block: result.block,
+    block: serializeBlock(result.block),
     transactions: result.transactions.map(serializeTransaction),
     collectionRun: result.collectionRun,
   };
@@ -45,7 +73,7 @@ export function buildBlockchainApi(
   dependencies: BlockchainApiDependencies,
 ): FastifyInstance {
   const application = Fastify({
-    logger: false,
+    logger: process.env["NODE_ENV"] !== "test",
     bodyLimit: 10_000,
     requestTimeout: 30_000,
   });
@@ -61,7 +89,7 @@ export function buildBlockchainApi(
       return reply.status(409).send({ error: "CONFLICT", message: error.message });
     }
     if (error instanceof BlockchainConnectionError) {
-      return reply.status(502).send({ error: "UPSTREAM_ERROR", message: error.message });
+      return reply.status(502).send({ error: "UPSTREAM_ERROR", message: "Upstream service temporarily unavailable" });
     }
     return reply.status(500).send({ error: "INTERNAL_ERROR" });
   });
@@ -82,13 +110,14 @@ export function buildBlockchainApi(
     if (!block) {
       throw new BlockchainNotFoundError(`Block ${blockNumber} not found`);
     }
-    return block;
+    return serializeBlock(block);
   });
 
   application.get("/blockchain/blocks/:blockNumber/observations", async (request) => {
     const blockNumber = parseBlockNumber(request);
     const network = await dependencies.blockchain.ensureNetwork();
-    return dependencies.blockchain.getBlockObservations(network.id, blockNumber);
+    const observations = await dependencies.blockchain.getBlockObservations(network.id, blockNumber);
+    return observations.map(serializeBlock);
   });
 
   application.get("/blockchain/blocks/:blockNumber/transactions", async (request) => {
@@ -113,7 +142,8 @@ export function buildBlockchainApi(
 
   application.get("/blockchain/sources", async () => {
     const network = await dependencies.blockchain.ensureNetwork();
-    return dependencies.blockchain.getDataSourcesForNetwork(network.id);
+    const sources = await dependencies.blockchain.getDataSourcesForNetwork(network.id);
+    return sources.map(serializeDataSource);
   });
 
   return application;

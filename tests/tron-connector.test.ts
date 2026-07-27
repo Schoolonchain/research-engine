@@ -369,5 +369,18 @@ describe("TronGridConnector", () => {
       });
       expect(c.sourceName).toBe("TronGrid-Secondary");
     });
+
+    it("rejects HTTP endpoints for non-loopback hosts", () => {
+      expect(() => new TronGridConnector({ endpoint: "http://evil.com" })).toThrow("HTTPS");
+    });
+
+    it("rejects hosts not in the allowlist", () => {
+      expect(() => new TronGridConnector({ endpoint: "https://evil.com" })).toThrow("not in the allowlist");
+    });
+
+    it("accepts valid TronGrid endpoint", () => {
+      const c = new TronGridConnector({ endpoint: "https://api.trongrid.io" });
+      expect(c.sourceEndpoint).toBe("https://api.trongrid.io");
+    });
   });
 });
