@@ -10,6 +10,7 @@ import { loadMigrations, migrate } from "../src/db/migrations.js";
 import type { BlockchainConnector } from "../src/blockchain/connector.js";
 import type { DataSourceType, RawBlock, RawTransaction } from "../src/blockchain/model.js";
 import { BlockchainService } from "../src/blockchain/blockchain-service.js";
+import { SqlBlockchainRepository } from "../src/blockchain/blockchain-repository.js";
 
 class Executor implements DatabaseExecutor {
   public constructor(private readonly database: PGlite | Transaction) {}
@@ -102,8 +103,9 @@ describe("multi-source comparison: TronGrid vs TronScan", () => {
       await loadMigrations(),
     );
     database = new Database(raw);
-    trongridService = new BlockchainService(database, new ApiConnector());
-    tronscanService = new BlockchainService(database, new ExplorerConnector());
+    const repository = new SqlBlockchainRepository();
+    trongridService = new BlockchainService(database, new ApiConnector(), repository);
+    tronscanService = new BlockchainService(database, new ExplorerConnector(), repository);
   });
 
   afterEach(async () => raw.close());

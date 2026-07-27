@@ -10,6 +10,7 @@ import { loadMigrations, migrate } from "../src/db/migrations.js";
 import type { BlockchainConnector } from "../src/blockchain/connector.js";
 import type { DataSourceType, RawBlock, RawTransaction } from "../src/blockchain/model.js";
 import { BlockchainService } from "../src/blockchain/blockchain-service.js";
+import { SqlBlockchainRepository } from "../src/blockchain/blockchain-repository.js";
 import {
   BlockchainConflictError,
   BlockchainValidationError,
@@ -123,7 +124,7 @@ describe("blockchain data collection", () => {
     );
     database = new Database(raw);
     connector = new StubConnector();
-    service = new BlockchainService(database, connector);
+    service = new BlockchainService(database, connector, new SqlBlockchainRepository());
   });
 
   afterEach(async () => raw.close());
@@ -395,8 +396,9 @@ describe("blockchain data collection", () => {
         sourceType: "NODE",
         sourceEndpoint: "grpc://tron-node.local:50051",
       });
-      serviceA = new BlockchainService(database, connectorA);
-      serviceB = new BlockchainService(database, connectorB);
+      const repository = new SqlBlockchainRepository();
+      serviceA = new BlockchainService(database, connectorA, repository);
+      serviceB = new BlockchainService(database, connectorB, repository);
     });
 
     it("allows two sources to independently collect the same block", async () => {

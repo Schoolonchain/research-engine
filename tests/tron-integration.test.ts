@@ -9,6 +9,7 @@ import type {
 import { loadMigrations, migrate } from "../src/db/migrations.js";
 import { TronGridConnector } from "../src/blockchain/tron-connector.js";
 import { BlockchainService } from "../src/blockchain/blockchain-service.js";
+import { SqlBlockchainRepository } from "../src/blockchain/blockchain-repository.js";
 
 class Executor implements DatabaseExecutor {
   public constructor(private readonly database: PGlite | Transaction) {}
@@ -46,7 +47,7 @@ describe.skipIf(!apiKey)("TRON real integration", { timeout: 30_000 }, () => {
     const config: { endpoint: string; apiKey?: string } = { endpoint };
     if (apiKey) config.apiKey = apiKey;
     connector = new TronGridConnector(config);
-    service = new BlockchainService(database, connector);
+    service = new BlockchainService(database, connector, new SqlBlockchainRepository());
   });
 
   afterEach(async () => raw.close());

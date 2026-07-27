@@ -3,6 +3,7 @@ import { loadMigrations, migrate } from "../src/db/migrations.js";
 import { TronGridConnector } from "../src/blockchain/tron-connector.js";
 import { TronScanConnector } from "../src/blockchain/tronscan-connector.js";
 import { BlockchainService } from "../src/blockchain/blockchain-service.js";
+import { SqlBlockchainRepository } from "../src/blockchain/blockchain-repository.js";
 
 class Executor {
   constructor(private readonly db: any) {}
@@ -51,8 +52,9 @@ async function main() {
   console.log(`   TronGrid: ${gridConnector.sourceName} (${gridConnector.sourceType})`);
   console.log(`   TronScan: ${scanConnector.sourceName} (${scanConnector.sourceType})\n`);
 
-  const gridService = new BlockchainService(database, gridConnector);
-  const scanService = new BlockchainService(database, scanConnector);
+  const repository = new SqlBlockchainRepository();
+  const gridService = new BlockchainService(database, gridConnector, repository);
+  const scanService = new BlockchainService(database, scanConnector, repository);
 
   // 3. Pick a block
   console.log("2. Obteniendo ultimo bloque...");
