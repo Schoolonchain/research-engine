@@ -58,7 +58,11 @@ export interface BlockchainRepository {
   findTransactionObservations(tx: DatabaseExecutor, networkId: string, txHash: string): Promise<readonly BlockchainTransaction[]>;
 
   insertCollectionRun(tx: DatabaseExecutor, id: string, networkId: string, sourceApi: string, blockNumber: number): Promise<void>;
+  insertRangeCollectionRun(tx: DatabaseExecutor, id: string, networkId: string, sourceApi: string, blockStart: number, blockEnd: number): Promise<void>;
   completeCollectionRun(tx: DatabaseExecutor, runId: string, txsCollected: number): Promise<DataCollectionRun>;
+  completeRangeCollectionRun(tx: DatabaseExecutor, runId: string, blocksCollected: number, txsCollected: number): Promise<DataCollectionRun>;
+  updateRunProgress(tx: DatabaseExecutor, runId: string, blocksCollected: number, txsCollected: number): Promise<void>;
+  failCollectionRun(tx: DatabaseExecutor, runId: string, blocksCollected: number, txsCollected: number, errorDetail: string): Promise<DataCollectionRun>;
   insertFailedRun(tx: DatabaseExecutor, id: string, networkId: string, sourceApi: string, blockNumber: number, errorDetail: string): Promise<void>;
   findCollectionRun(tx: DatabaseExecutor, runId: string): Promise<DataCollectionRun | null>;
 }
@@ -377,6 +381,49 @@ export class SqlBlockchainRepository implements BlockchainRepository {
        WHERE id = $2
        RETURNING ${RUN_COLS}`,
       [txsCollected, runId],
+    );
+    return toCollectionRun(result.rows[0]!);
+  }
+
+  public async insertRangeCollectionRun(tx: DatabaseExecutor, id: string, networkId: string, sourceApi: string, blockStart: number, blockEnd: number): Promise<void> {
+    await tx.query(
+      `INSERT INTO data_collection_runs (
+        id, network_id, run_type, status, source_api, block_start, block_end
+      ) VALUES ($1, $2, 'RANGE', 'RUNNING', $3, $4, $5)`,
+      [id, networkId, sourceApi, blockStart, blockEnd],
+    );
+  }
+
+  public async completeRangeCollectionRun(tx: DatabaseExecutor, runId: string, blocksCollected: number, txsCollected: number): Promise<DataCollectionRun> {
+    const result = await tx.query<CollectionRunRow>(
+      `UPDATE data_collection_runs
+       SET status = 'COMPLETED', blocks_collected = $1,
+           txs_collected = $2, completed_at = CURRENT_TIMESTAMP
+       WHERE id = $3
+       RETURNING ${RUN_COLS}`,
+      [blocksCollected, txsCollected, runId],
+    );
+    return toCollectionRun(result.rows[0]!);
+  }
+
+  public async updateRunProgress(tx: DatabaseExecutor, runId: string, blocksCollected: number, txsCollected: number): Promise<void> {
+    await tx.query(
+      `UPDATE data_collection_runs
+       SET blocks_collected = $1, txs_collected = $2
+       WHERE id = $3`,
+      [blocksCollected, txsCollected, runId],
+    );
+  }
+
+  public async failCollectionRun(tx: DatabaseExecutor, runId: string, blocksCollected: number, txsCollected: number, errorDetail: string): Promise<DataCollectionRun> {
+    const status = blocksCollected > 0 ? "PARTIAL" : "FAILED";
+    const result = await tx.query<CollectionRunRow>(
+      `UPDATE data_collection_runs
+       SET status = $1, blocks_collected = $2, txs_collected = $3,
+           error_detail = $4, completed_at = CURRENT_TIMESTAMP
+       WHERE id = $5
+       RETURNING ${RUN_COLS}`,
+      [status, blocksCollected, txsCollected, errorDetail, runId],
     );
     return toCollectionRun(result.rows[0]!);
   }

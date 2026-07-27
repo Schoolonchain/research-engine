@@ -2,7 +2,7 @@ import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 
 import type { ActorContext } from "../proposals/model.js";
 import type { BlockchainBlock, BlockchainDataSource, BlockchainTransaction } from "./model.js";
-import type { BlockchainService, CollectBlockResult } from "./blockchain-service.js";
+import type { BlockchainService, CollectBlockResult, RangeCollectionResult } from "./blockchain-service.js";
 import type { BlockchainRateLimiter } from "./blockchain-rate-limiter.js";
 import {
   BlockchainAuthenticationRequiredError,
@@ -79,6 +79,15 @@ function serializeCollectResult(result: CollectBlockResult): Record<string, unkn
   };
 }
 
+function serializeRangeResult(result: RangeCollectionResult): Record<string, unknown> {
+  return {
+    run: result.run,
+    collected: result.collected,
+    skipped: result.skipped,
+    totalTransactions: result.totalTransactions,
+  };
+}
+
 async function actor(
   request: FastifyRequest,
   authenticate: BlockchainAuthenticator,
@@ -136,6 +145,25 @@ export function buildBlockchainApi(
     await dependencies.rateLimiter.consume("block_collect", ctx.actorId);
     const result = await dependencies.blockchain.collectBlock(body.blockNumber, source);
     return reply.status(201).send(serializeCollectResult(result));
+  });
+
+  application.post("/blockchain/collect-range", async (request, reply) => {
+    const ctx = await actor(request, dependencies.authenticate);
+    const body = request.body as { startBlock?: unknown; endBlock?: unknown; source?: unknown } | null;
+    if (!body || typeof body.startBlock !== "number" || typeof body.endBlock !== "number") {
+      throw new BlockchainValidationError("startBlock and endBlock must be numbers");
+    }
+    let source: string | undefined;
+    if (body.source !== undefined && body.source !== null) {
+      if (typeof body.source !== "string") {
+        throw new BlockchainValidationError("source must be a string");
+      }
+      source = body.source;
+    }
+    await dependencies.rateLimiter.consume("block_collect", ctx.actorId);
+    const result = await dependencies.blockchain.collectRange(body.startBlock, body.endBlock, source);
+    const status = result.run.status === "COMPLETED" ? 201 : 207;
+    return reply.status(status).send(serializeRangeResult(result));
   });
 
   application.get("/blockchain/blocks/:blockNumber", async (request) => {

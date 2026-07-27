@@ -35,6 +35,15 @@ export interface CollectBlockResult {
   readonly collectionRun: DataCollectionRun;
 }
 
+export interface RangeCollectionResult {
+  readonly run: DataCollectionRun;
+  readonly collected: number;
+  readonly skipped: number;
+  readonly totalTransactions: number;
+}
+
+const MAX_RANGE_SIZE = 100;
+
 export class BlockchainService {
   private readonly events: EventStore;
 
@@ -201,6 +210,127 @@ export class BlockchainService {
     return this.database.transaction((tx) =>
       this.repository.findDataSourcesByNetwork(tx, networkId),
     );
+  }
+
+  public async collectRange(
+    startBlock: number,
+    endBlock: number,
+    sourceName?: string,
+  ): Promise<RangeCollectionResult> {
+    if (!Number.isSafeInteger(startBlock) || startBlock < 0) {
+      throw new BlockchainValidationError("startBlock must be a non-negative integer");
+    }
+    if (!Number.isSafeInteger(endBlock) || endBlock < 0) {
+      throw new BlockchainValidationError("endBlock must be a non-negative integer");
+    }
+    if (endBlock < startBlock) {
+      throw new BlockchainValidationError("endBlock must be >= startBlock");
+    }
+    const rangeSize = endBlock - startBlock + 1;
+    if (rangeSize > MAX_RANGE_SIZE) {
+      throw new BlockchainValidationError(
+        `Range size ${rangeSize} exceeds maximum of ${MAX_RANGE_SIZE}`,
+      );
+    }
+
+    const connector = this.registry.resolve(sourceName);
+    const network = await this.ensureNetwork();
+    const dataSource = await this.ensureDataSource(network.id, connector);
+
+    const runId = randomUUID();
+    await this.database.transaction(async (tx) => {
+      await this.repository.insertRangeCollectionRun(
+        tx, runId, network.id, connector.sourceName, startBlock, endBlock,
+      );
+    });
+
+    let blocksCollected = 0;
+    let skipped = 0;
+    let totalTransactions = 0;
+
+    for (let blockNumber = startBlock; blockNumber <= endBlock; blockNumber++) {
+      let rawBlock: import("./model.js").RawBlock;
+      try {
+        rawBlock = await connector.getBlock(blockNumber);
+      } catch (error) {
+        const run = await this.database.transaction(async (tx) =>
+          this.repository.failCollectionRun(
+            tx, runId, blocksCollected, totalTransactions,
+            `Failed at block ${blockNumber}: ${error instanceof Error ? error.message : String(error)}`,
+          ),
+        );
+        return Object.freeze({ run, collected: blocksCollected, skipped, totalTransactions });
+      }
+
+      const txCount = await this.database.transaction(async (tx) => {
+        const exists = await this.repository.blockExistsForSource(
+          tx, network.id, blockNumber, dataSource.id,
+        );
+        if (exists) return null;
+
+        const blockId = randomUUID();
+        const blockRawJson = JSON.stringify(rawBlock.raw);
+        assertRawDataSize(blockRawJson, `Block ${blockNumber}`);
+
+        await this.repository.insertBlock(tx, {
+          id: blockId,
+          networkId: network.id,
+          dataSourceId: dataSource.id,
+          blockNumber: rawBlock.blockNumber,
+          blockHash: rawBlock.blockHash,
+          parentHash: rawBlock.parentHash,
+          blockTimestamp: new Date(rawBlock.timestamp),
+          blockProducer: rawBlock.blockProducer,
+          txCount: rawBlock.txCount,
+          sizeBytes: rawBlock.sizeBytes,
+          rawData: blockRawJson,
+          collectionSource: connector.sourceName,
+        });
+
+        const transactions = await this.insertTransactions(
+          tx, network.id, dataSource.id, blockId, rawBlock.transactions,
+        );
+
+        const eventCommand: AppendEventCommand = {
+          eventId: randomUUID(),
+          eventType: "blockchain_block_collected",
+          eventVersion: 1,
+          aggregateType: "blockchain_collection",
+          aggregateId: runId,
+          expectedSequence: blocksCollected,
+          actor: { type: "system" },
+          correlationId: runId,
+          payload: {
+            networkId: network.id,
+            networkName: network.name,
+            dataSourceId: dataSource.id,
+            dataSourceName: dataSource.name,
+            blockNumber: rawBlock.blockNumber,
+            txCount: transactions.length,
+          },
+        };
+        await this.events.appendMany(tx, [eventCommand]);
+
+        await this.repository.updateRunProgress(
+          tx, runId, blocksCollected + 1, totalTransactions + transactions.length,
+        );
+
+        return transactions.length;
+      });
+
+      if (txCount === null) {
+        skipped++;
+      } else {
+        blocksCollected++;
+        totalTransactions += txCount;
+      }
+    }
+
+    const run = await this.database.transaction(async (tx) =>
+      this.repository.completeRangeCollectionRun(tx, runId, blocksCollected, totalTransactions),
+    );
+
+    return Object.freeze({ run, collected: blocksCollected, skipped, totalTransactions });
   }
 
   private async insertTransactions(

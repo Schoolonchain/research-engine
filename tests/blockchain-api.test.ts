@@ -69,7 +69,11 @@ class StubConnector implements BlockchainConnector {
   public readonly sourceType: DataSourceType = "API";
   public readonly sourceEndpoint = "https://stub.test";
   public latestBlockNumber = 50_000_100;
-  public blocks = new Map<number, RawBlock>([[50_000_000, makeBlock()]]);
+  public blocks = new Map<number, RawBlock>([
+    [50_000_000, makeBlock()],
+    [50_000_001, makeBlock({ blockNumber: 50_000_001, blockHash: "hash-1", transactions: [makeTx({ txHash: "tx-r1" })] })],
+    [50_000_002, makeBlock({ blockNumber: 50_000_002, blockHash: "hash-2", transactions: [makeTx({ txHash: "tx-r2" })] })],
+  ]);
 
   public async getLatestBlockNumber(): Promise<number> {
     return this.latestBlockNumber;
@@ -264,6 +268,59 @@ describe("blockchain API", () => {
       expect(response.headers["retry-after"]).toBeDefined();
 
       await limitedApp.close();
+    });
+  });
+
+  describe("POST /blockchain/collect-range", () => {
+    it("collects a range and returns 201", async () => {
+      const response = await app.inject({
+        method: "POST",
+        url: "/blockchain/collect-range",
+        headers: { authorization: "Bearer test-token" },
+        payload: { startBlock: 50_000_000, endBlock: 50_000_002 },
+      });
+
+      expect(response.statusCode).toBe(201);
+      const body = response.json();
+      expect(body.run.status).toBe("COMPLETED");
+      expect(body.run.runType).toBe("RANGE");
+      expect(body.collected).toBe(3);
+      expect(body.skipped).toBe(0);
+    });
+
+    it("returns 207 for partial collection", async () => {
+      const response = await app.inject({
+        method: "POST",
+        url: "/blockchain/collect-range",
+        headers: { authorization: "Bearer test-token" },
+        payload: { startBlock: 50_000_002, endBlock: 50_000_005 },
+      });
+
+      expect(response.statusCode).toBe(207);
+      const body = response.json();
+      expect(body.run.status).toBe("PARTIAL");
+      expect(body.collected).toBe(1);
+    });
+
+    it("returns 400 for missing parameters", async () => {
+      const response = await app.inject({
+        method: "POST",
+        url: "/blockchain/collect-range",
+        headers: { authorization: "Bearer test-token" },
+        payload: { startBlock: 50_000_000 },
+      });
+
+      expect(response.statusCode).toBe(400);
+    });
+
+    it("returns 401 without authorization", async () => {
+      const response = await app.inject({
+        method: "POST",
+        url: "/blockchain/collect-range",
+        payload: { startBlock: 50_000_000, endBlock: 50_000_002 },
+      });
+
+      expect(response.statusCode).toBe(401);
     });
   });
 

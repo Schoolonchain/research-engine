@@ -97,6 +97,15 @@ class StubConnector implements BlockchainConnector {
         makeTx({ txHash: "tx002", txType: "TriggerSmartContract", amount: null }),
       ],
     }));
+    for (let i = 2; i <= 5; i++) {
+      this.blocks.set(50_000_000 + i, makeBlock({
+        blockNumber: 50_000_000 + i,
+        blockHash: `hash-${50_000_000 + i}`,
+        parentHash: `hash-${50_000_000 + i - 1}`,
+        timestamp: 1700000000000 + i * 3000,
+        transactions: [makeTx({ txHash: `range-tx-${i}` })],
+      }));
+    }
   }
 
   public async getLatestBlockNumber(): Promise<number> {
@@ -379,6 +388,83 @@ describe("blockchain data collection", () => {
     const sources = await service.getDataSourcesForNetwork(network.id);
     expect(sources).toHaveLength(1);
     expect(sources[0]!.name).toBe("TronGrid:stub");
+  });
+
+  describe("range collection", () => {
+    it("collects a range of blocks", async () => {
+      const result = await service.collectRange(50_000_000, 50_000_002);
+
+      expect(result.run.status).toBe("COMPLETED");
+      expect(result.run.runType).toBe("RANGE");
+      expect(result.collected).toBe(3);
+      expect(result.skipped).toBe(0);
+      expect(result.totalTransactions).toBeGreaterThan(0);
+    });
+
+    it("skips already-collected blocks in range", async () => {
+      await service.collectBlock(50_000_000);
+      const result = await service.collectRange(50_000_000, 50_000_002);
+
+      expect(result.run.status).toBe("COMPLETED");
+      expect(result.collected).toBe(2);
+      expect(result.skipped).toBe(1);
+    });
+
+    it("returns PARTIAL when a block fetch fails mid-range", async () => {
+      connector.blocks.delete(50_000_004);
+      const result = await service.collectRange(50_000_002, 50_000_005);
+
+      expect(result.run.status).toBe("PARTIAL");
+      expect(result.collected).toBe(2);
+      expect(result.run.errorDetail).toContain("block 50000004");
+    });
+
+    it("returns FAILED when first block fails", async () => {
+      connector.blocks.delete(50_000_000);
+      const result = await service.collectRange(50_000_000, 50_000_001);
+
+      expect(result.run.status).toBe("FAILED");
+      expect(result.collected).toBe(0);
+    });
+
+    it("rejects invalid range parameters", async () => {
+      await expect(service.collectRange(-1, 5)).rejects.toThrow(BlockchainValidationError);
+      await expect(service.collectRange(10, 5)).rejects.toThrow(BlockchainValidationError);
+    });
+
+    it("rejects range exceeding maximum size", async () => {
+      await expect(service.collectRange(0, 100)).rejects.toThrow(BlockchainValidationError);
+    });
+
+    it("emits one event per collected block in range", async () => {
+      await service.collectRange(50_000_000, 50_000_002);
+
+      const events = await raw.query<{ payload: Record<string, unknown> }>(
+        `SELECT payload FROM domain_events
+         WHERE event_type = 'blockchain_block_collected'
+         ORDER BY recorded_at`,
+      );
+      expect(events.rows).toHaveLength(3);
+    });
+
+    it("recovery: re-running same range skips completed blocks", async () => {
+      connector.blocks.delete(50_000_003);
+      const partial = await service.collectRange(50_000_002, 50_000_004);
+      expect(partial.run.status).toBe("PARTIAL");
+      expect(partial.collected).toBe(1);
+
+      connector.blocks.set(50_000_003, makeBlock({
+        blockNumber: 50_000_003,
+        blockHash: "hash-50000003",
+        parentHash: "hash-50000002",
+        timestamp: 1700000009000,
+        transactions: [makeTx({ txHash: "range-tx-3-retry" })],
+      }));
+      const retry = await service.collectRange(50_000_002, 50_000_004);
+      expect(retry.run.status).toBe("COMPLETED");
+      expect(retry.collected).toBe(2);
+      expect(retry.skipped).toBe(1);
+    });
   });
 
   describe("multi-source coexistence", () => {
