@@ -536,3 +536,29 @@ propuesta no se considera aprobada hasta recibir confirmación humana.
 - Consecuencia: TronGrid y un nodo directo pueden coexistir, compararse y conservar procedencia
   independiente. `getBlockObservations` y `getTransactionObservations` devuelven todas las
   observaciones. Migración 0015 implementa el cambio.
+
+## D-064 — Configuración TronGrid como sección opcional del entorno
+
+- Fecha: 2026-07-27
+- Estado: IMPLEMENTADA; PENDIENTE DE APROBACIÓN HUMANA
+- Decisión: las variables `TRONGRID_API_KEY`, `TRONGRID_ENDPOINT` y `TRONGRID_TIMEOUT_MS` se
+  cargan opcionalmente en `loadEnvironment()`. Si ninguna está presente, `trongrid` es `null` y
+  las funcionalidades blockchain no están disponibles. El endpoint por defecto es
+  `https://api.trongrid.io`.
+- Motivo: no bloquear el arranque de la aplicación cuando las funcionalidades blockchain no están
+  configuradas, manteniendo las credenciales gestionadas a través del sistema existente de
+  variables de entorno.
+- Consecuencia: la clave API nunca aparece en código fuente, migraciones ni mensajes de error
+  del conector.
+
+## D-065 — API HTTP blockchain como módulo Fastify independiente
+
+- Fecha: 2026-07-27
+- Estado: IMPLEMENTADA; PENDIENTE DE APROBACIÓN HUMANA
+- Decisión: `buildBlockchainApi()` expone un subconjunto de operaciones blockchain como rutas
+  HTTP Fastify: recolección (`POST /blockchain/collect`), consulta de bloques y transacciones,
+  observaciones multi-fuente, número de bloque más reciente, red y fuentes de datos.
+- Motivo: completar el vertical slice permitiendo que los datos recolectados puedan consultarse
+  vía HTTP, siguiendo el patrón establecido por `buildProposalApi()`.
+- Consecuencia: los campos BigInt de transacciones se serializan como strings en las respuestas
+  JSON.
