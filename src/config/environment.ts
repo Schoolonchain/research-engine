@@ -7,6 +7,12 @@ export interface TrongridConfig {
   readonly timeoutMs: number;
 }
 
+export interface TronscanConfig {
+  readonly endpoint: string;
+  readonly apiKey: string | undefined;
+  readonly timeoutMs: number;
+}
+
 export interface Environment {
   readonly nodeEnv: NodeEnvironment;
   readonly databaseUrl: string;
@@ -18,6 +24,7 @@ export interface Environment {
     readonly key: string;
   }[];
   readonly trongrid: TrongridConfig | null;
+  readonly tronscan: TronscanConfig | null;
 }
 
 function required(
@@ -133,6 +140,24 @@ export function loadEnvironment(
     });
   }
 
+  const tronscanApiKey = source["TRONSCAN_API_KEY"]?.trim() || undefined;
+  const tronscanEndpointRaw = source["TRONSCAN_ENDPOINT"]?.trim();
+
+  let tronscan: TronscanConfig | null = null;
+  if (tronscanApiKey || tronscanEndpointRaw) {
+    const endpoint = tronscanEndpointRaw || "https://apilist.tronscanapi.com";
+    try {
+      new URL(endpoint);
+    } catch {
+      throw new Error("TRONSCAN_ENDPOINT must be a valid URL");
+    }
+    tronscan = Object.freeze({
+      endpoint,
+      apiKey: tronscanApiKey,
+      timeoutMs: positiveInteger(source, "TRONSCAN_TIMEOUT_MS", 15_000),
+    });
+  }
+
   return Object.freeze({
     nodeEnv: nodeEnvironment(source),
     databaseUrl: postgresUrl(source),
@@ -156,6 +181,7 @@ export function loadEnvironment(
       ),
     ),
     trongrid,
+    tronscan,
   });
 }
 
