@@ -56,7 +56,8 @@ interface TronTransactionInfo {
   };
 }
 
-function hexToBase58Check(hex: string | undefined): string | null {
+// TRON addresses arrive as hex; stored as-is until a Base58Check encoder is added.
+function normalizeAddress(hex: string | undefined): string | null {
   if (!hex) return null;
   return hex;
 }
@@ -74,8 +75,8 @@ function extractTransactions(
     return {
       txHash: tx.txID ?? "",
       txType: contract?.type ?? "Unknown",
-      fromAddress: hexToBase58Check(value?.owner_address),
-      toAddress: hexToBase58Check(value?.to_address),
+      fromAddress: normalizeAddress(value?.owner_address),
+      toAddress: normalizeAddress(value?.to_address),
       amount: amount !== undefined ? String(amount) : null,
       fee: info?.fee !== undefined ? String(info.fee) : null,
       amountUnit: "SUN",
@@ -154,7 +155,7 @@ export class TronGridConnector implements BlockchainConnector {
       blockHash: block.blockID,
       parentHash: header.parentHash ?? "",
       timestamp: header.timestamp ?? 0,
-      blockProducer: hexToBase58Check(header.witness_address),
+      blockProducer: normalizeAddress(header.witness_address),
       txCount: transactions.length,
       sizeBytes: rawSize,
       transactions,

@@ -25,6 +25,12 @@ function assertRawDataSize(json: string, label: string): void {
   }
 }
 
+const NETWORK_COLS = "id, name, chain_id, network_type, status";
+const DATA_SOURCE_COLS = "id, network_id, source_type, name, endpoint, status, priority";
+const BLOCK_COLS = "id, network_id, data_source_id, block_number, block_hash, parent_hash, block_timestamp, block_producer, tx_count, size_bytes, collection_source, collected_at";
+const TX_COLS = "id, network_id, data_source_id, block_id, tx_hash, tx_type, from_address, to_address, amount, fee, amount_unit, fee_unit, result, chain_data, collected_at";
+const RUN_COLS = "id, network_id, run_type, status, source_api, block_start, block_end, blocks_collected, txs_collected, error_detail, started_at, completed_at";
+
 interface NetworkRow {
   readonly id: string;
   readonly name: string;
@@ -186,7 +192,7 @@ export class BlockchainService {
   public async ensureNetwork(): Promise<BlockchainNetwork> {
     return this.database.transaction(async (tx) => {
       const existing = await tx.query<NetworkRow>(
-        "SELECT * FROM blockchain_networks WHERE chain_id = $1",
+        `SELECT ${NETWORK_COLS} FROM blockchain_networks WHERE chain_id = $1`,
         [this.connector.chainId],
       );
       if (existing.rows[0]) return toNetwork(existing.rows[0]);
@@ -195,7 +201,7 @@ export class BlockchainService {
         `INSERT INTO blockchain_networks (name, chain_id, network_type)
          VALUES ($1, $2, $3)
          ON CONFLICT (chain_id) DO UPDATE SET updated_at = CURRENT_TIMESTAMP
-         RETURNING *`,
+         RETURNING ${NETWORK_COLS}`,
         [this.connector.networkName, this.connector.chainId, "MAINNET"],
       );
       return toNetwork(inserted.rows[0]!);
@@ -205,7 +211,7 @@ export class BlockchainService {
   public async ensureDataSource(networkId: string): Promise<BlockchainDataSource> {
     return this.database.transaction(async (tx) => {
       const existing = await tx.query<DataSourceRow>(
-        "SELECT * FROM blockchain_data_sources WHERE network_id = $1 AND name = $2",
+        `SELECT ${DATA_SOURCE_COLS} FROM blockchain_data_sources WHERE network_id = $1 AND name = $2`,
         [networkId, this.connector.sourceName],
       );
       if (existing.rows[0]) return toDataSource(existing.rows[0]);
@@ -215,7 +221,7 @@ export class BlockchainService {
           network_id, source_type, name, endpoint
         ) VALUES ($1, $2, $3, $4)
         ON CONFLICT (network_id, name) DO UPDATE SET updated_at = CURRENT_TIMESTAMP
-        RETURNING *`,
+        RETURNING ${DATA_SOURCE_COLS}`,
         [
           networkId,
           this.connector.sourceType,
@@ -253,7 +259,7 @@ export class BlockchainService {
         `INSERT INTO data_collection_runs (
           id, network_id, run_type, status, source_api, block_start, block_end
         ) VALUES ($1, $2, 'BLOCK', 'RUNNING', $3, $4, $4)
-        RETURNING *`,
+        RETURNING ${RUN_COLS}`,
         [runId, network.id, this.connector.sourceName, blockNumber],
       );
 
@@ -267,7 +273,7 @@ export class BlockchainService {
           block_timestamp, block_producer, tx_count, size_bytes,
           raw_data, collection_source
         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12)
-        RETURNING *`,
+        RETURNING ${BLOCK_COLS}`,
         [
           blockId, network.id, dataSource.id, rawBlock.blockNumber,
           rawBlock.blockHash, rawBlock.parentHash, new Date(rawBlock.timestamp),
@@ -285,7 +291,7 @@ export class BlockchainService {
          SET status = 'COMPLETED', blocks_collected = 1,
              txs_collected = $1, completed_at = CURRENT_TIMESTAMP
          WHERE id = $2
-         RETURNING *`,
+         RETURNING ${RUN_COLS}`,
         [transactions.length, runId],
       );
 
@@ -325,13 +331,13 @@ export class BlockchainService {
     const result = await this.database.transaction(async (tx) => {
       if (dataSourceId) {
         return tx.query<BlockRow>(
-          `SELECT * FROM blockchain_blocks
+          `SELECT ${BLOCK_COLS} FROM blockchain_blocks
            WHERE network_id = $1 AND block_number = $2 AND data_source_id = $3`,
           [networkId, blockNumber, dataSourceId],
         );
       }
       return tx.query<BlockRow>(
-        `SELECT * FROM blockchain_blocks
+        `SELECT ${BLOCK_COLS} FROM blockchain_blocks
          WHERE network_id = $1 AND block_number = $2
          ORDER BY collected_at ASC LIMIT 1`,
         [networkId, blockNumber],
@@ -346,7 +352,7 @@ export class BlockchainService {
   ): Promise<readonly BlockchainBlock[]> {
     const result = await this.database.transaction(async (tx) => {
       return tx.query<BlockRow>(
-        `SELECT * FROM blockchain_blocks
+        `SELECT ${BLOCK_COLS} FROM blockchain_blocks
          WHERE network_id = $1 AND block_number = $2
          ORDER BY collected_at ASC`,
         [networkId, blockNumber],
@@ -358,7 +364,7 @@ export class BlockchainService {
   public async getTransactionsByBlock(blockId: string): Promise<readonly BlockchainTransaction[]> {
     const result = await this.database.transaction(async (tx) => {
       return tx.query<TransactionRow>(
-        "SELECT * FROM blockchain_transactions WHERE block_id = $1 ORDER BY tx_hash",
+        `SELECT ${TX_COLS} FROM blockchain_transactions WHERE block_id = $1 ORDER BY tx_hash`,
         [blockId],
       );
     });
@@ -371,7 +377,7 @@ export class BlockchainService {
   ): Promise<readonly BlockchainTransaction[]> {
     const result = await this.database.transaction(async (tx) => {
       return tx.query<TransactionRow>(
-        `SELECT * FROM blockchain_transactions
+        `SELECT ${TX_COLS} FROM blockchain_transactions
          WHERE network_id = $1 AND tx_hash = $2
          ORDER BY collected_at ASC`,
         [networkId, txHash],
@@ -387,7 +393,7 @@ export class BlockchainService {
   public async getCollectionRun(runId: string): Promise<DataCollectionRun | null> {
     const result = await this.database.transaction(async (tx) => {
       return tx.query<CollectionRunRow>(
-        "SELECT * FROM data_collection_runs WHERE id = $1",
+        `SELECT ${RUN_COLS} FROM data_collection_runs WHERE id = $1`,
         [runId],
       );
     });
@@ -399,7 +405,7 @@ export class BlockchainService {
   ): Promise<readonly BlockchainDataSource[]> {
     const result = await this.database.transaction(async (tx) => {
       return tx.query<DataSourceRow>(
-        `SELECT * FROM blockchain_data_sources
+        `SELECT ${DATA_SOURCE_COLS} FROM blockchain_data_sources
          WHERE network_id = $1
          ORDER BY priority DESC, created_at ASC`,
         [networkId],
@@ -428,7 +434,7 @@ export class BlockchainService {
           from_address, to_address, amount, fee,
           amount_unit, fee_unit, result, chain_data, raw_data
         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb,$15::jsonb)
-        RETURNING *`,
+        RETURNING ${TX_COLS}`,
         [
           txId, networkId, dataSourceId, blockId, rawTx.txHash, rawTx.txType,
           rawTx.fromAddress, rawTx.toAddress,
