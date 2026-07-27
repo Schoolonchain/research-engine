@@ -11,6 +11,7 @@ import type { BlockchainConnector } from "../src/blockchain/connector.js";
 import type { DataSourceType, RawBlock, RawTransaction } from "../src/blockchain/model.js";
 import { BlockchainService } from "../src/blockchain/blockchain-service.js";
 import { SqlBlockchainRepository } from "../src/blockchain/blockchain-repository.js";
+import { ConnectorRegistry } from "../src/blockchain/connector-registry.js";
 import {
   BlockchainConflictError,
   BlockchainValidationError,
@@ -124,7 +125,7 @@ describe("blockchain data collection", () => {
     );
     database = new Database(raw);
     connector = new StubConnector();
-    service = new BlockchainService(database, connector, new SqlBlockchainRepository());
+    service = new BlockchainService(database, new ConnectorRegistry([connector]), new SqlBlockchainRepository());
   });
 
   afterEach(async () => raw.close());
@@ -381,29 +382,26 @@ describe("blockchain data collection", () => {
   });
 
   describe("multi-source coexistence", () => {
-    let connectorA: StubConnector;
-    let connectorB: StubConnector;
-    let serviceA: BlockchainService;
-    let serviceB: BlockchainService;
+    let multiService: BlockchainService;
 
     beforeEach(() => {
-      connectorA = new StubConnector({
+      const connectorA = new StubConnector({
         sourceName: "TronGrid",
         sourceEndpoint: "https://api.trongrid.io",
       });
-      connectorB = new StubConnector({
+      const connectorB = new StubConnector({
         sourceName: "DirectNode",
         sourceType: "NODE",
         sourceEndpoint: "grpc://tron-node.local:50051",
       });
-      const repository = new SqlBlockchainRepository();
-      serviceA = new BlockchainService(database, connectorA, repository);
-      serviceB = new BlockchainService(database, connectorB, repository);
+      multiService = new BlockchainService(
+        database, new ConnectorRegistry([connectorA, connectorB]), new SqlBlockchainRepository(),
+      );
     });
 
     it("allows two sources to independently collect the same block", async () => {
-      const resultA = await serviceA.collectBlock(50_000_000);
-      const resultB = await serviceB.collectBlock(50_000_000);
+      const resultA = await multiService.collectBlock(50_000_000, "TronGrid");
+      const resultB = await multiService.collectBlock(50_000_000, "DirectNode");
 
       expect(resultA.block.blockNumber).toBe(50_000_000);
       expect(resultB.block.blockNumber).toBe(50_000_000);
@@ -413,10 +411,10 @@ describe("blockchain data collection", () => {
     });
 
     it("returns all observations via getBlockObservations", async () => {
-      const resultA = await serviceA.collectBlock(50_000_000);
-      await serviceB.collectBlock(50_000_000);
+      const resultA = await multiService.collectBlock(50_000_000, "TronGrid");
+      await multiService.collectBlock(50_000_000, "DirectNode");
 
-      const observations = await serviceA.getBlockObservations(
+      const observations = await multiService.getBlockObservations(
         resultA.block.networkId, 50_000_000,
       );
       expect(observations).toHaveLength(2);
@@ -425,10 +423,10 @@ describe("blockchain data collection", () => {
     });
 
     it("returns all transaction observations via getTransactionObservations", async () => {
-      const resultA = await serviceA.collectBlock(50_000_000);
-      await serviceB.collectBlock(50_000_000);
+      const resultA = await multiService.collectBlock(50_000_000, "TronGrid");
+      await multiService.collectBlock(50_000_000, "DirectNode");
 
-      const observations = await serviceA.getTransactionObservations(
+      const observations = await multiService.getTransactionObservations(
         resultA.block.networkId, "abc123def456",
       );
       expect(observations).toHaveLength(2);
@@ -436,32 +434,32 @@ describe("blockchain data collection", () => {
       expect(sourceIds.size).toBe(2);
     });
 
-    it("shares the same network record across sources", async () => {
-      const networkA = await serviceA.ensureNetwork();
-      const networkB = await serviceB.ensureNetwork();
-      expect(networkA.id).toBe(networkB.id);
+    it("shares the same network record (single service, single registry)", async () => {
+      const network = await multiService.ensureNetwork();
+      expect(network.chainId).toBe("tron-mainnet");
     });
 
-    it("creates separate data source records per source", async () => {
-      const network = await serviceA.ensureNetwork();
-      const dsA = await serviceA.ensureDataSource(network.id);
-      const dsB = await serviceB.ensureDataSource(network.id);
-      expect(dsA.id).not.toBe(dsB.id);
-      expect(dsA.name).toBe("TronGrid");
-      expect(dsB.name).toBe("DirectNode");
-      expect(dsB.sourceType).toBe("NODE");
+    it("creates separate data source records per connector", async () => {
+      await multiService.collectBlock(50_000_000, "TronGrid");
+      await multiService.collectBlock(50_000_000, "DirectNode");
+      const network = await multiService.ensureNetwork();
+      const sources = await multiService.getDataSourcesForNetwork(network.id);
+      expect(sources).toHaveLength(2);
+      const names = sources.map((s) => s.name).sort();
+      expect(names).toEqual(["DirectNode", "TronGrid"]);
+      expect(sources.find((s) => s.name === "DirectNode")!.sourceType).toBe("NODE");
     });
 
     it("still rejects duplicate from the same source", async () => {
-      await serviceA.collectBlock(50_000_000);
-      await expect(serviceA.collectBlock(50_000_000)).rejects.toBeInstanceOf(
+      await multiService.collectBlock(50_000_000, "TronGrid");
+      await expect(multiService.collectBlock(50_000_000, "TronGrid")).rejects.toBeInstanceOf(
         BlockchainConflictError,
       );
     });
 
     it("records independent events per source collection", async () => {
-      await serviceA.collectBlock(50_000_000);
-      await serviceB.collectBlock(50_000_000);
+      await multiService.collectBlock(50_000_000, "TronGrid");
+      await multiService.collectBlock(50_000_000, "DirectNode");
 
       const events = await raw.query<{
         payload: Record<string, unknown>;

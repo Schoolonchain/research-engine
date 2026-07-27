@@ -4,6 +4,7 @@ import { TronGridConnector } from "../src/blockchain/tron-connector.js";
 import { TronScanConnector } from "../src/blockchain/tronscan-connector.js";
 import { BlockchainService } from "../src/blockchain/blockchain-service.js";
 import { SqlBlockchainRepository } from "../src/blockchain/blockchain-repository.js";
+import { ConnectorRegistry } from "../src/blockchain/connector-registry.js";
 
 class Executor {
   constructor(private readonly db: any) {}
@@ -52,20 +53,19 @@ async function main() {
   console.log(`   TronGrid: ${gridConnector.sourceName} (${gridConnector.sourceType})`);
   console.log(`   TronScan: ${scanConnector.sourceName} (${scanConnector.sourceType})\n`);
 
-  const repository = new SqlBlockchainRepository();
-  const gridService = new BlockchainService(database, gridConnector, repository);
-  const scanService = new BlockchainService(database, scanConnector, repository);
+  const registry = new ConnectorRegistry([gridConnector, scanConnector]);
+  const service = new BlockchainService(database, registry, new SqlBlockchainRepository());
 
   // 3. Pick a block
   console.log("2. Obteniendo ultimo bloque...");
-  const latest = await gridConnector.getLatestBlockNumber();
+  const latest = await service.getLatestBlockNumber();
   const targetBlock = latest - 200;
   console.log(`   Ultimo: #${latest.toLocaleString()}`);
   console.log(`   Target: #${targetBlock.toLocaleString()}\n`);
 
   // 4. Collect from TronGrid
   console.log("3. Recolectando desde TronGrid...");
-  const gridResult = await gridService.collectBlock(targetBlock);
+  const gridResult = await service.collectBlock(targetBlock, "TronGrid");
   console.log(`   Hash: ${gridResult.block.blockHash}`);
   console.log(`   Block producer: ${gridResult.block.blockProducer}`);
   console.log(`   Txs: ${gridResult.transactions.length}`);
@@ -75,7 +75,7 @@ async function main() {
 
   // 5. Collect same block from TronScan
   console.log("4. Recolectando desde TronScan...");
-  const scanResult = await scanService.collectBlock(targetBlock);
+  const scanResult = await service.collectBlock(targetBlock, "TronScan");
   console.log(`   Hash: ${scanResult.block.blockHash}`);
   console.log(`   Block producer: ${scanResult.block.blockProducer}`);
   console.log(`   Txs: ${scanResult.transactions.length}`);
@@ -94,7 +94,7 @@ async function main() {
 
   // 7. Observations query
   console.log("6. Consultando observaciones del bloque...");
-  const observations = await gridService.getBlockObservations(
+  const observations = await service.getBlockObservations(
     gridResult.block.networkId, targetBlock,
   );
   console.log(`   Total observaciones: ${observations.length}`);
@@ -105,8 +105,8 @@ async function main() {
 
   // 8. Data sources
   console.log("7. Fuentes de datos registradas:");
-  const network = await gridService.ensureNetwork();
-  const sources = await gridService.getDataSourcesForNetwork(network.id);
+  const network = await service.ensureNetwork();
+  const sources = await service.getDataSourcesForNetwork(network.id);
   for (const src of sources) {
     console.log(`   - ${src.name} (${src.sourceType}) | ${src.endpoint}`);
   }
@@ -123,7 +123,7 @@ async function main() {
     console.log(`   En comun:      ${common.length}`);
 
     if (common.length > 0) {
-      const txObs = await gridService.getTransactionObservations(
+      const txObs = await service.getTransactionObservations(
         gridResult.block.networkId, common[0]!,
       );
       console.log(`\n   Observaciones de tx ${common[0]!.substring(0, 20)}...:`);

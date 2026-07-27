@@ -12,6 +12,7 @@ import type { DataSourceType, RawBlock, RawTransaction } from "../src/blockchain
 import type { ActorContext } from "../src/proposals/model.js";
 import { BlockchainService } from "../src/blockchain/blockchain-service.js";
 import { SqlBlockchainRepository } from "../src/blockchain/blockchain-repository.js";
+import { ConnectorRegistry } from "../src/blockchain/connector-registry.js";
 import { BlockchainRateLimiter } from "../src/blockchain/blockchain-rate-limiter.js";
 import { buildBlockchainApi } from "../src/blockchain/api.js";
 
@@ -99,7 +100,7 @@ describe("blockchain API", () => {
     const database = new Database(raw);
     const connector = new StubConnector();
     const repository = new SqlBlockchainRepository();
-    const service = new BlockchainService(database, connector, repository);
+    const service = new BlockchainService(database, new ConnectorRegistry([connector]), repository);
     const rateLimiter = new BlockchainRateLimiter(database);
     app = buildBlockchainApi({
       blockchain: service,
@@ -227,7 +228,7 @@ describe("blockchain API", () => {
           }),
         ]),
       );
-      const service = new BlockchainService(database, connector, new SqlBlockchainRepository());
+      const service = new BlockchainService(database, new ConnectorRegistry([connector]), new SqlBlockchainRepository());
       const rateLimiter = new BlockchainRateLimiter(database, {
         version: 1,
         windowSeconds: 60,

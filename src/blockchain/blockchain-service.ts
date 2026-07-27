@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import type { DatabaseExecutor, TransactionalDatabase } from "../db/database.js";
 import { EventStore, type AppendEventCommand } from "../events/event-store.js";
 import type { BlockchainConnector } from "./connector.js";
+import type { ConnectorRegistry } from "./connector-registry.js";
 import type { BlockchainRepository } from "./blockchain-repository.js";
 import type {
   BlockchainBlock,
@@ -39,7 +40,7 @@ export class BlockchainService {
 
   public constructor(
     private readonly database: TransactionalDatabase,
-    private readonly connector: BlockchainConnector,
+    private readonly registry: ConnectorRegistry,
     private readonly repository: BlockchainRepository,
   ) {
     this.events = new EventStore(database);
@@ -47,37 +48,39 @@ export class BlockchainService {
 
   public async ensureNetwork(): Promise<BlockchainNetwork> {
     return this.database.transaction(async (tx) => {
-      const existing = await this.repository.findNetworkByChainId(tx, this.connector.chainId);
+      const existing = await this.repository.findNetworkByChainId(tx, this.registry.chainId);
       if (existing) return existing;
-      return this.repository.upsertNetwork(tx, this.connector.networkName, this.connector.chainId, "MAINNET");
+      return this.repository.upsertNetwork(tx, this.registry.networkName, this.registry.chainId, "MAINNET");
     });
   }
 
-  public async ensureDataSource(networkId: string): Promise<BlockchainDataSource> {
+  public async ensureDataSource(networkId: string, connector?: BlockchainConnector): Promise<BlockchainDataSource> {
+    const c = connector ?? this.registry.primary();
     return this.database.transaction(async (tx) => {
-      const existing = await this.repository.findDataSourceByName(tx, networkId, this.connector.sourceName);
+      const existing = await this.repository.findDataSourceByName(tx, networkId, c.sourceName);
       if (existing) return existing;
       return this.repository.upsertDataSource(
-        tx, networkId, this.connector.sourceType, this.connector.sourceName, this.connector.sourceEndpoint,
+        tx, networkId, c.sourceType, c.sourceName, c.sourceEndpoint,
       );
     });
   }
 
-  public async collectBlock(blockNumber: number): Promise<CollectBlockResult> {
+  public async collectBlock(blockNumber: number, sourceName?: string): Promise<CollectBlockResult> {
     if (!Number.isSafeInteger(blockNumber) || blockNumber < 0) {
       throw new BlockchainValidationError("Block number must be a non-negative integer");
     }
 
+    const connector = this.registry.resolve(sourceName);
     const network = await this.ensureNetwork();
-    const dataSource = await this.ensureDataSource(network.id);
+    const dataSource = await this.ensureDataSource(network.id, connector);
 
     let rawBlock: import("./model.js").RawBlock;
     try {
-      rawBlock = await this.connector.getBlock(blockNumber);
+      rawBlock = await connector.getBlock(blockNumber);
     } catch (error) {
       await this.database.transaction(async (tx) => {
         await this.repository.insertFailedRun(
-          tx, randomUUID(), network.id, this.connector.sourceName, blockNumber,
+          tx, randomUUID(), network.id, connector.sourceName, blockNumber,
           error instanceof Error ? error.message : String(error),
         );
       });
@@ -88,12 +91,12 @@ export class BlockchainService {
       const exists = await this.repository.blockExistsForSource(tx, network.id, blockNumber, dataSource.id);
       if (exists) {
         throw new BlockchainConflictError(
-          `Block ${blockNumber} already collected from ${this.connector.sourceName}`,
+          `Block ${blockNumber} already collected from ${connector.sourceName}`,
         );
       }
 
       const runId = randomUUID();
-      await this.repository.insertCollectionRun(tx, runId, network.id, this.connector.sourceName, blockNumber);
+      await this.repository.insertCollectionRun(tx, runId, network.id, connector.sourceName, blockNumber);
 
       const blockId = randomUUID();
       const blockRawJson = JSON.stringify(rawBlock.raw);
@@ -111,7 +114,7 @@ export class BlockchainService {
         txCount: rawBlock.txCount,
         sizeBytes: rawBlock.sizeBytes,
         rawData: blockRawJson,
-        collectionSource: this.connector.sourceName,
+        collectionSource: connector.sourceName,
       });
 
       const transactions = await this.insertTransactions(
@@ -183,7 +186,7 @@ export class BlockchainService {
   }
 
   public async getLatestBlockNumber(): Promise<number> {
-    return this.connector.getLatestBlockNumber();
+    return this.registry.primary().getLatestBlockNumber();
   }
 
   public async getCollectionRun(runId: string): Promise<DataCollectionRun | null> {

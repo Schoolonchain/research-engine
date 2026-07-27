@@ -122,12 +122,19 @@ export function buildBlockchainApi(
 
   application.post("/blockchain/collect", async (request, reply) => {
     const ctx = await actor(request, dependencies.authenticate);
-    const body = request.body as { blockNumber?: unknown } | null;
+    const body = request.body as { blockNumber?: unknown; source?: unknown } | null;
     if (!body || typeof body.blockNumber !== "number") {
       throw new BlockchainValidationError("blockNumber must be a number");
     }
+    let source: string | undefined;
+    if (body.source !== undefined && body.source !== null) {
+      if (typeof body.source !== "string") {
+        throw new BlockchainValidationError("source must be a string");
+      }
+      source = body.source;
+    }
     await dependencies.rateLimiter.consume("block_collect", ctx.actorId);
-    const result = await dependencies.blockchain.collectBlock(body.blockNumber);
+    const result = await dependencies.blockchain.collectBlock(body.blockNumber, source);
     return reply.status(201).send(serializeCollectResult(result));
   });
 

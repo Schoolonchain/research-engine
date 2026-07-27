@@ -11,6 +11,7 @@ import type { BlockchainConnector } from "../src/blockchain/connector.js";
 import type { DataSourceType, RawBlock, RawTransaction } from "../src/blockchain/model.js";
 import { BlockchainService } from "../src/blockchain/blockchain-service.js";
 import { SqlBlockchainRepository } from "../src/blockchain/blockchain-repository.js";
+import { ConnectorRegistry } from "../src/blockchain/connector-registry.js";
 
 class Executor implements DatabaseExecutor {
   public constructor(private readonly database: PGlite | Transaction) {}
@@ -91,9 +92,7 @@ class ExplorerConnector implements BlockchainConnector {
 
 describe("multi-source comparison: TronGrid vs TronScan", () => {
   let raw: PGlite;
-  let database: Database;
-  let trongridService: BlockchainService;
-  let tronscanService: BlockchainService;
+  let service: BlockchainService;
 
   beforeEach(async () => {
     raw = new PGlite();
@@ -102,37 +101,35 @@ describe("multi-source comparison: TronGrid vs TronScan", () => {
         values.length === 0 ? raw.exec(sql) : raw.query(sql, [...values]) },
       await loadMigrations(),
     );
-    database = new Database(raw);
-    const repository = new SqlBlockchainRepository();
-    trongridService = new BlockchainService(database, new ApiConnector(), repository);
-    tronscanService = new BlockchainService(database, new ExplorerConnector(), repository);
+    const database = new Database(raw);
+    const registry = new ConnectorRegistry([new ApiConnector(), new ExplorerConnector()]);
+    service = new BlockchainService(database, registry, new SqlBlockchainRepository());
   });
 
   afterEach(async () => raw.close());
 
-  it("both sources share the same network record", async () => {
-    const networkA = await trongridService.ensureNetwork();
-    const networkB = await tronscanService.ensureNetwork();
-
-    expect(networkA.id).toBe(networkB.id);
-    expect(networkA.chainId).toBe("tron-mainnet");
+  it("single service shares the same network record for all connectors", async () => {
+    const network = await service.ensureNetwork();
+    expect(network.chainId).toBe("tron-mainnet");
   });
 
   it("creates separate data source records with correct types", async () => {
-    const network = await trongridService.ensureNetwork();
-    const dsGrid = await trongridService.ensureDataSource(network.id);
-    const dsScan = await tronscanService.ensureDataSource(network.id);
+    await service.collectBlock(50_000_000, "TronGrid");
+    await service.collectBlock(50_000_000, "TronScan");
 
-    expect(dsGrid.id).not.toBe(dsScan.id);
-    expect(dsGrid.name).toBe("TronGrid");
-    expect(dsGrid.sourceType).toBe("API");
-    expect(dsScan.name).toBe("TronScan");
-    expect(dsScan.sourceType).toBe("EXPLORER");
+    const network = await service.ensureNetwork();
+    const sources = await service.getDataSourcesForNetwork(network.id);
+    expect(sources).toHaveLength(2);
+    const grid = sources.find((s) => s.name === "TronGrid")!;
+    const scan = sources.find((s) => s.name === "TronScan")!;
+    expect(grid.id).not.toBe(scan.id);
+    expect(grid.sourceType).toBe("API");
+    expect(scan.sourceType).toBe("EXPLORER");
   });
 
   it("collects the same block independently from both sources", async () => {
-    const resultGrid = await trongridService.collectBlock(50_000_000);
-    const resultScan = await tronscanService.collectBlock(50_000_000);
+    const resultGrid = await service.collectBlock(50_000_000, "TronGrid");
+    const resultScan = await service.collectBlock(50_000_000, "TronScan");
 
     expect(resultGrid.block.blockNumber).toBe(50_000_000);
     expect(resultScan.block.blockNumber).toBe(50_000_000);
@@ -143,10 +140,10 @@ describe("multi-source comparison: TronGrid vs TronScan", () => {
   });
 
   it("returns both observations via getBlockObservations", async () => {
-    const resultGrid = await trongridService.collectBlock(50_000_000);
-    await tronscanService.collectBlock(50_000_000);
+    const resultGrid = await service.collectBlock(50_000_000, "TronGrid");
+    await service.collectBlock(50_000_000, "TronScan");
 
-    const observations = await trongridService.getBlockObservations(
+    const observations = await service.getBlockObservations(
       resultGrid.block.networkId, 50_000_000,
     );
 
@@ -158,10 +155,10 @@ describe("multi-source comparison: TronGrid vs TronScan", () => {
   });
 
   it("returns both transaction observations via getTransactionObservations", async () => {
-    const resultGrid = await trongridService.collectBlock(50_000_000);
-    await tronscanService.collectBlock(50_000_000);
+    const resultGrid = await service.collectBlock(50_000_000, "TronGrid");
+    await service.collectBlock(50_000_000, "TronScan");
 
-    const observations = await trongridService.getTransactionObservations(
+    const observations = await service.getTransactionObservations(
       resultGrid.block.networkId, "abc123def456",
     );
 
@@ -171,8 +168,8 @@ describe("multi-source comparison: TronGrid vs TronScan", () => {
   });
 
   it("preserves raw data from each source independently", async () => {
-    await trongridService.collectBlock(50_000_000);
-    await tronscanService.collectBlock(50_000_000);
+    await service.collectBlock(50_000_000, "TronGrid");
+    await service.collectBlock(50_000_000, "TronScan");
 
     const blocks = await raw.query<{ raw_data: Record<string, unknown>; collection_source: string }>(
       `SELECT raw_data, collection_source FROM blockchain_blocks
@@ -187,8 +184,8 @@ describe("multi-source comparison: TronGrid vs TronScan", () => {
   });
 
   it("records separate domain events for each source", async () => {
-    await trongridService.collectBlock(50_000_000);
-    await tronscanService.collectBlock(50_000_000);
+    await service.collectBlock(50_000_000, "TronGrid");
+    await service.collectBlock(50_000_000, "TronScan");
 
     const events = await raw.query<{ payload: Record<string, unknown> }>(
       `SELECT payload FROM domain_events
@@ -202,11 +199,11 @@ describe("multi-source comparison: TronGrid vs TronScan", () => {
   });
 
   it("lists both data sources for the network", async () => {
-    await trongridService.collectBlock(50_000_000);
-    await tronscanService.collectBlock(50_000_000);
+    await service.collectBlock(50_000_000, "TronGrid");
+    await service.collectBlock(50_000_000, "TronScan");
 
-    const network = await trongridService.ensureNetwork();
-    const sources = await trongridService.getDataSourcesForNetwork(network.id);
+    const network = await service.ensureNetwork();
+    const sources = await service.getDataSourcesForNetwork(network.id);
 
     expect(sources).toHaveLength(2);
     const names = sources.map((s) => s.name).sort();
@@ -214,13 +211,13 @@ describe("multi-source comparison: TronGrid vs TronScan", () => {
   });
 
   it("allows querying a specific source's observation", async () => {
-    const resultGrid = await trongridService.collectBlock(50_000_000);
-    const resultScan = await tronscanService.collectBlock(50_000_000);
+    const resultGrid = await service.collectBlock(50_000_000, "TronGrid");
+    const resultScan = await service.collectBlock(50_000_000, "TronScan");
 
-    const gridBlock = await trongridService.getBlock(
+    const gridBlock = await service.getBlock(
       resultGrid.block.networkId, 50_000_000, resultGrid.block.dataSourceId,
     );
-    const scanBlock = await tronscanService.getBlock(
+    const scanBlock = await service.getBlock(
       resultScan.block.networkId, 50_000_000, resultScan.block.dataSourceId,
     );
 
@@ -230,8 +227,8 @@ describe("multi-source comparison: TronGrid vs TronScan", () => {
   });
 
   it("creates separate collection runs per source", async () => {
-    const resultGrid = await trongridService.collectBlock(50_000_000);
-    const resultScan = await tronscanService.collectBlock(50_000_000);
+    const resultGrid = await service.collectBlock(50_000_000, "TronGrid");
+    const resultScan = await service.collectBlock(50_000_000, "TronScan");
 
     expect(resultGrid.collectionRun.sourceApi).toBe("TronGrid");
     expect(resultScan.collectionRun.sourceApi).toBe("TronScan");

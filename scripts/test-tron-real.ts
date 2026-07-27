@@ -3,6 +3,7 @@ import { loadMigrations, migrate } from "../src/db/migrations.js";
 import { TronGridConnector } from "../src/blockchain/tron-connector.js";
 import { BlockchainService } from "../src/blockchain/blockchain-service.js";
 import { SqlBlockchainRepository } from "../src/blockchain/blockchain-repository.js";
+import { ConnectorRegistry } from "../src/blockchain/connector-registry.js";
 
 class Executor {
   constructor(private readonly db: any) {}
@@ -45,7 +46,7 @@ async function main() {
   const targetBlock = latest - 100;
   console.log(`4. Recolectando bloque #${targetBlock.toLocaleString()}...`);
   const database = new Database(raw);
-  const service = new BlockchainService(database, connector, new SqlBlockchainRepository());
+  const service = new BlockchainService(database, new ConnectorRegistry([connector]), new SqlBlockchainRepository());
   const result = await service.collectBlock(targetBlock);
 
   console.log(`   Block hash: ${result.block.blockHash}`);
