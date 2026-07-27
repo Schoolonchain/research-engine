@@ -34,10 +34,10 @@ describe("initial database migration", () => {
     await database.close();
   });
 
-  it("creates the complete Phase 1 schema and is idempotent", async () => {
+  it("creates the complete Phase 1 schema and is idempotent", { timeout: 15_000 }, async () => {
     const migrations = await loadMigrations();
 
-    expect(migrations).toHaveLength(13);
+    expect(migrations).toHaveLength(14);
     await migrate(executor, migrations);
     await migrate(executor, migrations);
 
@@ -49,7 +49,7 @@ describe("initial database migration", () => {
     `);
 
     const tableNames = result.rows.map((row) => row.table_name);
-    expect(tableNames).toHaveLength(25);
+    expect(tableNames).toHaveLength(29);
     expect(tableNames).toEqual(
       expect.arrayContaining([
         "abuse_signals",
@@ -57,8 +57,12 @@ describe("initial database migration", () => {
         "aggregate_event_counts",
         "aggregate_streams",
         "authorizations",
+        "blockchain_blocks",
+        "blockchain_networks",
+        "blockchain_transactions",
         "claims",
         "consumer_receipts",
+        "data_collection_runs",
         "domain_events",
         "evidence",
         "outbox_messages",

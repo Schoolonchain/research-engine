@@ -484,3 +484,40 @@ propuesta no se considera aprobada hasta recibir confirmación humana.
 - Decisión: Evidence y contradicciones solo cuentan si Claim es efectivamente aceptable,
   incluida la Source asociada a Claim cuando exista.
 - Motivo: impedir que una Evidence aceptada rehabilite indirectamente un antecedente rechazado.
+
+## D-059 — Datos blockchain en tablas propias, no en sources
+
+- Fecha: 2026-07-27
+- Estado: IMPLEMENTADA; PENDIENTE DE APROBACIÓN HUMANA
+- Decisión: los datos de blockchain se almacenan en `blockchain_blocks`, `blockchain_transactions`
+  y `blockchain_networks`, separados de las tablas de `sources`.
+- Motivo: un bloque o transacción no es una contribución de un participante; es un dato obtenido
+  activamente por el sistema. Su estructura, volumen y ciclo de vida son distintos.
+- Consecuencia: la promoción futura a Source/Evidence requerirá un mecanismo explícito.
+
+## D-060 — Conector blockchain como interfaz inyectable
+
+- Fecha: 2026-07-27
+- Estado: IMPLEMENTADA; PENDIENTE DE APROBACIÓN HUMANA
+- Decisión: definir `BlockchainConnector` como interfaz; la primera implementación usa TronGrid.
+- Motivo: permitir sustituir TronGrid por conexión directa a nodo o por otros proveedores sin
+  modificar el servicio de recolección.
+- Consecuencia: los tests usan un conector stub sin dependencia de red.
+
+## D-061 — La recolección blockchain no crea Authorization ni ResearchJob
+
+- Fecha: 2026-07-27
+- Estado: IMPLEMENTADA; PENDIENTE DE APROBACIÓN HUMANA
+- Decisión: `collectBlock` no desencadena autorización, investigación ni IA.
+- Motivo: consistencia con el principio de que ninguna acción de recolección inicia ejecución
+  costosa; la blockchain es una fuente de datos, no un trigger de investigación.
+- Consecuencia: verificado con test negativo explícito.
+
+## D-062 — Procedencia completa de cada dato blockchain
+
+- Fecha: 2026-07-27
+- Estado: IMPLEMENTADA; PENDIENTE DE APROBACIÓN HUMANA
+- Decisión: cada bloque y transacción conserva `collection_source`, `collected_at` y `raw_data`.
+  Cada recolección se registra en `data_collection_runs` con API, timestamps y contadores.
+- Motivo: trazabilidad y auditabilidad de la procedencia de los datos.
+- Consecuencia: se puede reconstruir cuándo, de dónde y cómo se obtuvo cada dato.
