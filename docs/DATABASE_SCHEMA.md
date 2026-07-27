@@ -1,4 +1,4 @@
-# Modelo de datos — Fases 1–4
+# Modelo de datos — Fases 1–6 + Blockchain
 
 Fuentes ejecutables:
 
@@ -15,6 +15,8 @@ Fuentes ejecutables:
 - `migrations/0011_scoring_snapshots.sql`
 - `migrations/0012_scoring_integrity_guards.sql`
 - `migrations/0013_scoring_policy_identity.sql`
+- `migrations/0014_blockchain_data.sql`
+- `migrations/0015_blockchain_multi_source.sql`
 
 ## Agregados principales
 

@@ -484,3 +484,81 @@ propuesta no se considera aprobada hasta recibir confirmación humana.
 - Decisión: Evidence y contradicciones solo cuentan si Claim es efectivamente aceptable,
   incluida la Source asociada a Claim cuando exista.
 - Motivo: impedir que una Evidence aceptada rehabilite indirectamente un antecedente rechazado.
+
+## D-059 — Datos blockchain en tablas propias, no en sources
+
+- Fecha: 2026-07-27
+- Estado: IMPLEMENTADA; PENDIENTE DE APROBACIÓN HUMANA
+- Decisión: los datos de blockchain se almacenan en `blockchain_blocks`, `blockchain_transactions`
+  y `blockchain_networks`, separados de las tablas de `sources`.
+- Motivo: un bloque o transacción no es una contribución de un participante; es un dato obtenido
+  activamente por el sistema. Su estructura, volumen y ciclo de vida son distintos.
+- Consecuencia: la promoción futura a Source/Evidence requerirá un mecanismo explícito.
+
+## D-060 — Conector blockchain como interfaz inyectable
+
+- Fecha: 2026-07-27
+- Estado: IMPLEMENTADA; PENDIENTE DE APROBACIÓN HUMANA
+- Decisión: definir `BlockchainConnector` como interfaz; la primera implementación usa TronGrid.
+- Motivo: permitir sustituir TronGrid por conexión directa a nodo o por otros proveedores sin
+  modificar el servicio de recolección.
+- Consecuencia: los tests usan un conector stub sin dependencia de red.
+
+## D-061 — La recolección blockchain no crea Authorization ni ResearchJob
+
+- Fecha: 2026-07-27
+- Estado: IMPLEMENTADA; PENDIENTE DE APROBACIÓN HUMANA
+- Decisión: `collectBlock` no desencadena autorización, investigación ni IA.
+- Motivo: consistencia con el principio de que ninguna acción de recolección inicia ejecución
+  costosa; la blockchain es una fuente de datos, no un trigger de investigación.
+- Consecuencia: verificado con test negativo explícito.
+
+## D-062 — Procedencia completa de cada dato blockchain
+
+- Fecha: 2026-07-27
+- Estado: IMPLEMENTADA; PENDIENTE DE APROBACIÓN HUMANA
+- Decisión: cada bloque y transacción conserva `collection_source`, `collected_at` y `raw_data`.
+  Cada recolección se registra en `data_collection_runs` con API, timestamps y contadores.
+- Motivo: trazabilidad y auditabilidad de la procedencia de los datos.
+- Consecuencia: se puede reconstruir cuándo, de dónde y cómo se obtuvo cada dato.
+
+## D-063 — Fuentes de datos blockchain como entidad independiente
+
+- Fecha: 2026-07-27
+- Estado: IMPLEMENTADA; PENDIENTE DE APROBACIÓN HUMANA
+- Decisión: crear `blockchain_data_sources` como tabla independiente con FK desde bloques y
+  transacciones. Cada observación queda vinculada a un `data_source_id` concreto. Las restricciones
+  UNIQUE incluyen `data_source_id`, permitiendo que dos fuentes registren el mismo bloque o
+  transacción de forma independiente.
+- Motivo: la arquitectura original (D-059) usaba `collection_source` como texto libre sin
+  integridad referencial, y UNIQUE(network_id, block_number) impedía que dos fuentes almacenasen
+  el mismo bloque. Esto bloqueaba la comparación multi-fuente y la auditoría cruzada.
+- Consecuencia: TronGrid y un nodo directo pueden coexistir, compararse y conservar procedencia
+  independiente. `getBlockObservations` y `getTransactionObservations` devuelven todas las
+  observaciones. Migración 0015 implementa el cambio.
+
+## D-064 — Configuración TronGrid como sección opcional del entorno
+
+- Fecha: 2026-07-27
+- Estado: IMPLEMENTADA; PENDIENTE DE APROBACIÓN HUMANA
+- Decisión: las variables `TRONGRID_API_KEY`, `TRONGRID_ENDPOINT` y `TRONGRID_TIMEOUT_MS` se
+  cargan opcionalmente en `loadEnvironment()`. Si ninguna está presente, `trongrid` es `null` y
+  las funcionalidades blockchain no están disponibles. El endpoint por defecto es
+  `https://api.trongrid.io`.
+- Motivo: no bloquear el arranque de la aplicación cuando las funcionalidades blockchain no están
+  configuradas, manteniendo las credenciales gestionadas a través del sistema existente de
+  variables de entorno.
+- Consecuencia: la clave API nunca aparece en código fuente, migraciones ni mensajes de error
+  del conector.
+
+## D-065 — API HTTP blockchain como módulo Fastify independiente
+
+- Fecha: 2026-07-27
+- Estado: IMPLEMENTADA; PENDIENTE DE APROBACIÓN HUMANA
+- Decisión: `buildBlockchainApi()` expone un subconjunto de operaciones blockchain como rutas
+  HTTP Fastify: recolección (`POST /blockchain/collect`), consulta de bloques y transacciones,
+  observaciones multi-fuente, número de bloque más reciente, red y fuentes de datos.
+- Motivo: completar el vertical slice permitiendo que los datos recolectados puedan consultarse
+  vía HTTP, siguiendo el patrón establecido por `buildProposalApi()`.
+- Consecuencia: los campos BigInt de transacciones se serializan como strings en las respuestas
+  JSON.
