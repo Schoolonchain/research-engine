@@ -9,7 +9,9 @@ import type {
 import { loadMigrations, migrate } from "../src/db/migrations.js";
 import type { BlockchainConnector } from "../src/blockchain/connector.js";
 import type { DataSourceType, RawBlock, RawTransaction } from "../src/blockchain/model.js";
+import type { ActorContext } from "../src/proposals/model.js";
 import { BlockchainService } from "../src/blockchain/blockchain-service.js";
+import { BlockchainRateLimiter } from "../src/blockchain/blockchain-rate-limiter.js";
 import { buildBlockchainApi } from "../src/blockchain/api.js";
 
 class Executor implements DatabaseExecutor {
@@ -77,6 +79,11 @@ class StubConnector implements BlockchainConnector {
   }
 }
 
+const tokens = new Map<string, ActorContext>([
+  ["test-token", { actorId: "actor-1", role: "USER" }],
+  ["admin-token", { actorId: "actor-admin", role: "ADMIN" }],
+]);
+
 describe("blockchain API", () => {
   let raw: PGlite;
   let app: ReturnType<typeof buildBlockchainApi>;
@@ -91,7 +98,16 @@ describe("blockchain API", () => {
     const database = new Database(raw);
     const connector = new StubConnector();
     const service = new BlockchainService(database, connector);
-    app = buildBlockchainApi({ blockchain: service });
+    const rateLimiter = new BlockchainRateLimiter(database);
+    app = buildBlockchainApi({
+      blockchain: service,
+      authenticate: async (request) => {
+        const header = request.headers.authorization;
+        if (!header?.startsWith("Bearer ")) return undefined;
+        return tokens.get(header.slice("Bearer ".length));
+      },
+      rateLimiter,
+    });
   });
 
   afterEach(async () => {
@@ -104,6 +120,7 @@ describe("blockchain API", () => {
       const response = await app.inject({
         method: "POST",
         url: "/blockchain/collect",
+        headers: { authorization: "Bearer test-token" },
         payload: { blockNumber: 50_000_000 },
       });
 
@@ -118,6 +135,7 @@ describe("blockchain API", () => {
       const response = await app.inject({
         method: "POST",
         url: "/blockchain/collect",
+        headers: { authorization: "Bearer test-token" },
         payload: { blockNumber: 50_000_000 },
       });
 
@@ -134,12 +152,14 @@ describe("blockchain API", () => {
       await app.inject({
         method: "POST",
         url: "/blockchain/collect",
+        headers: { authorization: "Bearer test-token" },
         payload: { blockNumber: 50_000_000 },
       });
 
       const response = await app.inject({
         method: "POST",
         url: "/blockchain/collect",
+        headers: { authorization: "Bearer test-token" },
         payload: { blockNumber: 50_000_000 },
       });
 
@@ -151,6 +171,7 @@ describe("blockchain API", () => {
       const response = await app.inject({
         method: "POST",
         url: "/blockchain/collect",
+        headers: { authorization: "Bearer test-token" },
         payload: { blockNumber: -1 },
       });
 
@@ -161,10 +182,85 @@ describe("blockchain API", () => {
       const response = await app.inject({
         method: "POST",
         url: "/blockchain/collect",
+        headers: { authorization: "Bearer test-token" },
         payload: {},
       });
 
       expect(response.statusCode).toBe(400);
+    });
+
+    it("returns 401 without authorization header", async () => {
+      const response = await app.inject({
+        method: "POST",
+        url: "/blockchain/collect",
+        payload: { blockNumber: 50_000_000 },
+      });
+
+      expect(response.statusCode).toBe(401);
+      expect(response.json().error).toBe("AUTHENTICATION_REQUIRED");
+    });
+
+    it("returns 401 with invalid token", async () => {
+      const response = await app.inject({
+        method: "POST",
+        url: "/blockchain/collect",
+        headers: { authorization: "Bearer invalid-token" },
+        payload: { blockNumber: 50_000_000 },
+      });
+
+      expect(response.statusCode).toBe(401);
+      expect(response.json().error).toBe("AUTHENTICATION_REQUIRED");
+    });
+
+    it("returns 429 when rate limited", async () => {
+      const database = new Database(raw);
+      const connector = new StubConnector();
+      connector.blocks = new Map(
+        Array.from({ length: 35 }, (_, i) => [
+          i,
+          makeBlock({
+            blockNumber: i,
+            blockHash: `hash-${i}`,
+            transactions: [makeTx({ txHash: `tx-${i}` })],
+          }),
+        ]),
+      );
+      const service = new BlockchainService(database, connector);
+      const rateLimiter = new BlockchainRateLimiter(database, {
+        version: 1,
+        windowSeconds: 60,
+        retentionSeconds: 600,
+        actorLimits: Object.freeze({ block_collect: 3 }),
+        globalLimit: 500,
+      });
+      const limitedApp = buildBlockchainApi({
+        blockchain: service,
+        authenticate: async () => ({ actorId: "actor-1", role: "USER" }),
+        rateLimiter,
+      });
+
+      for (let i = 0; i < 3; i++) {
+        const r = await limitedApp.inject({
+          method: "POST",
+          url: "/blockchain/collect",
+          headers: { authorization: "Bearer test-token" },
+          payload: { blockNumber: i },
+        });
+        expect(r.statusCode).toBe(201);
+      }
+
+      const response = await limitedApp.inject({
+        method: "POST",
+        url: "/blockchain/collect",
+        headers: { authorization: "Bearer test-token" },
+        payload: { blockNumber: 4 },
+      });
+
+      expect(response.statusCode).toBe(429);
+      expect(response.json().error).toBe("RATE_LIMITED");
+      expect(response.headers["retry-after"]).toBeDefined();
+
+      await limitedApp.close();
     });
   });
 
@@ -173,6 +269,7 @@ describe("blockchain API", () => {
       await app.inject({
         method: "POST",
         url: "/blockchain/collect",
+        headers: { authorization: "Bearer test-token" },
         payload: { blockNumber: 50_000_000 },
       });
 
@@ -189,6 +286,7 @@ describe("blockchain API", () => {
       await app.inject({
         method: "POST",
         url: "/blockchain/collect",
+        headers: { authorization: "Bearer test-token" },
         payload: { blockNumber: 50_000_000 },
       });
 
@@ -215,6 +313,7 @@ describe("blockchain API", () => {
       await app.inject({
         method: "POST",
         url: "/blockchain/collect",
+        headers: { authorization: "Bearer test-token" },
         payload: { blockNumber: 50_000_000 },
       });
 
@@ -233,6 +332,7 @@ describe("blockchain API", () => {
       await app.inject({
         method: "POST",
         url: "/blockchain/collect",
+        headers: { authorization: "Bearer test-token" },
         payload: { blockNumber: 50_000_000 },
       });
 
@@ -251,6 +351,7 @@ describe("blockchain API", () => {
       await app.inject({
         method: "POST",
         url: "/blockchain/collect",
+        headers: { authorization: "Bearer test-token" },
         payload: { blockNumber: 50_000_000 },
       });
 
@@ -299,6 +400,7 @@ describe("blockchain API", () => {
       await app.inject({
         method: "POST",
         url: "/blockchain/collect",
+        headers: { authorization: "Bearer test-token" },
         payload: { blockNumber: 50_000_000 },
       });
 

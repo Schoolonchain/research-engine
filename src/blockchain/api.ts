@@ -1,16 +1,26 @@
 import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 
+import type { ActorContext } from "../proposals/model.js";
 import type { BlockchainBlock, BlockchainDataSource, BlockchainTransaction } from "./model.js";
 import type { BlockchainService, CollectBlockResult } from "./blockchain-service.js";
+import type { BlockchainRateLimiter } from "./blockchain-rate-limiter.js";
 import {
+  BlockchainAuthenticationRequiredError,
   BlockchainConflictError,
   BlockchainConnectionError,
   BlockchainNotFoundError,
+  BlockchainRateLimitError,
   BlockchainValidationError,
 } from "./errors.js";
 
+export type BlockchainAuthenticator = (
+  request: FastifyRequest,
+) => Promise<ActorContext | undefined>;
+
 export interface BlockchainApiDependencies {
   readonly blockchain: BlockchainService;
+  readonly authenticate: BlockchainAuthenticator;
+  readonly rateLimiter: BlockchainRateLimiter;
 }
 
 function serializeBlock(block: BlockchainBlock): Record<string, unknown> {
@@ -69,6 +79,15 @@ function serializeCollectResult(result: CollectBlockResult): Record<string, unkn
   };
 }
 
+async function actor(
+  request: FastifyRequest,
+  authenticate: BlockchainAuthenticator,
+): Promise<ActorContext> {
+  const context = await authenticate(request);
+  if (!context) throw new BlockchainAuthenticationRequiredError();
+  return context;
+}
+
 export function buildBlockchainApi(
   dependencies: BlockchainApiDependencies,
 ): FastifyInstance {
@@ -82,11 +101,18 @@ export function buildBlockchainApi(
     if (error instanceof BlockchainValidationError) {
       return reply.status(400).send({ error: "INVALID_REQUEST", message: error.message });
     }
+    if (error instanceof BlockchainAuthenticationRequiredError) {
+      return reply.status(401).send({ error: "AUTHENTICATION_REQUIRED" });
+    }
     if (error instanceof BlockchainNotFoundError) {
       return reply.status(404).send({ error: "NOT_FOUND", message: error.message });
     }
     if (error instanceof BlockchainConflictError) {
       return reply.status(409).send({ error: "CONFLICT", message: error.message });
+    }
+    if (error instanceof BlockchainRateLimitError) {
+      return reply.header("retry-after", String(error.retryAfterSeconds))
+        .status(429).send({ error: "RATE_LIMITED" });
     }
     if (error instanceof BlockchainConnectionError) {
       return reply.status(502).send({ error: "UPSTREAM_ERROR", message: "Upstream service temporarily unavailable" });
@@ -95,10 +121,12 @@ export function buildBlockchainApi(
   });
 
   application.post("/blockchain/collect", async (request, reply) => {
+    const ctx = await actor(request, dependencies.authenticate);
     const body = request.body as { blockNumber?: unknown } | null;
     if (!body || typeof body.blockNumber !== "number") {
       throw new BlockchainValidationError("blockNumber must be a number");
     }
+    await dependencies.rateLimiter.consume("block_collect", ctx.actorId);
     const result = await dependencies.blockchain.collectBlock(body.blockNumber);
     return reply.status(201).send(serializeCollectResult(result));
   });

@@ -56,6 +56,43 @@ interface TronTransactionInfo {
   };
 }
 
+function assertBlockResponse(data: unknown, blockNumber: number): asserts data is TronBlockResponse {
+  if (!data || typeof data !== "object") {
+    throw new BlockchainConnectionError(`Invalid block response for block ${blockNumber}: not an object`);
+  }
+  const obj = data as Record<string, unknown>;
+  if (obj.blockID !== undefined && typeof obj.blockID !== "string") {
+    throw new BlockchainConnectionError(`Invalid block response for block ${blockNumber}: blockID is not a string`);
+  }
+  if (obj.block_header !== undefined) {
+    if (typeof obj.block_header !== "object" || obj.block_header === null) {
+      throw new BlockchainConnectionError(`Invalid block response for block ${blockNumber}: block_header is not an object`);
+    }
+    const header = obj.block_header as Record<string, unknown>;
+    if (header.raw_data !== undefined) {
+      if (typeof header.raw_data !== "object" || header.raw_data === null) {
+        throw new BlockchainConnectionError(`Invalid block response for block ${blockNumber}: raw_data is not an object`);
+      }
+      const raw = header.raw_data as Record<string, unknown>;
+      if (raw.number !== undefined && typeof raw.number !== "number") {
+        throw new BlockchainConnectionError(`Invalid block response for block ${blockNumber}: block number is not a number`);
+      }
+      if (raw.timestamp !== undefined && typeof raw.timestamp !== "number") {
+        throw new BlockchainConnectionError(`Invalid block response for block ${blockNumber}: timestamp is not a number`);
+      }
+    }
+  }
+  if (obj.transactions !== undefined && !Array.isArray(obj.transactions)) {
+    throw new BlockchainConnectionError(`Invalid block response for block ${blockNumber}: transactions is not an array`);
+  }
+}
+
+function assertTransactionInfoArray(data: unknown, blockNumber: number): asserts data is TronTransactionInfo[] {
+  if (!Array.isArray(data)) {
+    throw new BlockchainConnectionError(`Invalid transaction info response for block ${blockNumber}: not an array`);
+  }
+}
+
 // TRON addresses arrive as hex; stored as-is until a Base58Check encoder is added.
 function normalizeAddress(hex: string | undefined): string | null {
   if (!hex) return null;
@@ -113,8 +150,8 @@ export class TronGridConnector implements BlockchainConnector {
 
   public async getLatestBlockNumber(): Promise<number> {
     const response = await this.post("/wallet/getnowblock", {});
-    const block = response as TronBlockResponse;
-    const number = block.block_header?.raw_data?.number;
+    assertBlockResponse(response, -1);
+    const number = response.block_header?.raw_data?.number;
     if (number === undefined) {
       throw new BlockchainConnectionError("Invalid response: missing block number");
     }
@@ -131,35 +168,35 @@ export class TronGridConnector implements BlockchainConnector {
       this.post("/wallet/gettransactioninfobyblocknum", { num: blockNumber }),
     ]);
 
-    const block = blockResponse as TronBlockResponse;
-    if (!block.blockID) {
+    assertBlockResponse(blockResponse, blockNumber);
+    if (!blockResponse.blockID) {
       throw new BlockchainNotFoundError(`Block ${blockNumber} not found`);
     }
 
-    const header = block.block_header?.raw_data;
+    const header = blockResponse.block_header?.raw_data;
     if (!header) {
       throw new BlockchainConnectionError("Invalid response: missing block header");
     }
 
-    const infos = Array.isArray(infoResponse) ? infoResponse as TronTransactionInfo[] : [];
+    assertTransactionInfoArray(infoResponse, blockNumber);
     const infoMap = new Map<string, TronTransactionInfo>();
-    for (const info of infos) {
+    for (const info of infoResponse) {
       if (info.id) infoMap.set(info.id, info);
     }
 
-    const transactions = extractTransactions(block.transactions, infoMap);
-    const rawSize = JSON.stringify(block).length;
+    const transactions = extractTransactions(blockResponse.transactions, infoMap);
+    const rawSize = JSON.stringify(blockResponse).length;
 
     return {
       blockNumber: header.number ?? blockNumber,
-      blockHash: block.blockID,
+      blockHash: blockResponse.blockID,
       parentHash: header.parentHash ?? "",
       timestamp: header.timestamp ?? 0,
       blockProducer: normalizeAddress(header.witness_address),
       txCount: transactions.length,
       sizeBytes: rawSize,
       transactions,
-      raw: block as unknown as Readonly<Record<string, unknown>>,
+      raw: blockResponse as unknown as Readonly<Record<string, unknown>>,
     };
   }
 

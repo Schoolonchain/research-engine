@@ -47,6 +47,32 @@ interface TronscanTransactionList {
   readonly data?: readonly TronscanTransaction[];
 }
 
+function assertBlockResponse(data: unknown, blockNumber: number): asserts data is TronscanBlockResponse {
+  if (!data || typeof data !== "object") {
+    throw new BlockchainConnectionError(`Invalid block response for block ${blockNumber}: not an object`);
+  }
+  const obj = data as Record<string, unknown>;
+  if (obj.number !== undefined && typeof obj.number !== "number") {
+    throw new BlockchainConnectionError(`Invalid block response for block ${blockNumber}: block number is not a number`);
+  }
+  if (obj.hash !== undefined && typeof obj.hash !== "string") {
+    throw new BlockchainConnectionError(`Invalid block response for block ${blockNumber}: hash is not a string`);
+  }
+  if (obj.timestamp !== undefined && typeof obj.timestamp !== "number") {
+    throw new BlockchainConnectionError(`Invalid block response for block ${blockNumber}: timestamp is not a number`);
+  }
+}
+
+function assertTransactionList(data: unknown, blockNumber: number): asserts data is TronscanTransactionList {
+  if (!data || typeof data !== "object") {
+    throw new BlockchainConnectionError(`Invalid transaction response for block ${blockNumber}: not an object`);
+  }
+  const obj = data as Record<string, unknown>;
+  if (obj.data !== undefined && !Array.isArray(obj.data)) {
+    throw new BlockchainConnectionError(`Invalid transaction response for block ${blockNumber}: data is not an array`);
+  }
+}
+
 const CONTRACT_TYPES: Readonly<Record<number, string>> = {
   1: "TransferContract",
   2: "TransferAssetContract",
@@ -115,12 +141,18 @@ export class TronScanConnector implements BlockchainConnector {
 
   public async getLatestBlockNumber(): Promise<number> {
     const response = await this.get("/api/block", { sort: "-number", limit: "1", start: "0" });
-    const list = response as { data?: readonly { number?: number }[] };
-    const number = list.data?.[0]?.number;
-    if (number === undefined) {
+    if (!response || typeof response !== "object") {
+      throw new BlockchainConnectionError("Invalid response: not an object");
+    }
+    const list = response as { data?: unknown };
+    if (!Array.isArray(list.data)) {
+      throw new BlockchainConnectionError("Invalid response: data is not an array");
+    }
+    const first = list.data[0] as Record<string, unknown> | undefined;
+    if (!first || typeof first.number !== "number") {
       throw new BlockchainConnectionError("Invalid response: missing block number");
     }
-    return number;
+    return first.number;
   }
 
   public async getBlock(blockNumber: number): Promise<RawBlock> {
@@ -138,24 +170,24 @@ export class TronScanConnector implements BlockchainConnector {
       }),
     ]);
 
-    const block = blockResponse as TronscanBlockResponse;
-    if (!block.hash) {
+    assertBlockResponse(blockResponse, blockNumber);
+    if (!blockResponse.hash) {
       throw new BlockchainNotFoundError(`Block ${blockNumber} not found`);
     }
 
-    const txList = txResponse as TronscanTransactionList;
-    const transactions = extractTransactions(txList.data);
+    assertTransactionList(txResponse, blockNumber);
+    const transactions = extractTransactions(txResponse.data);
 
     return {
-      blockNumber: block.number ?? blockNumber,
-      blockHash: block.hash,
-      parentHash: block.parentHash ?? "",
-      timestamp: block.timestamp ?? 0,
-      blockProducer: block.witnessAddress ?? null,
+      blockNumber: blockResponse.number ?? blockNumber,
+      blockHash: blockResponse.hash,
+      parentHash: blockResponse.parentHash ?? "",
+      timestamp: blockResponse.timestamp ?? 0,
+      blockProducer: blockResponse.witnessAddress ?? null,
       txCount: transactions.length,
-      sizeBytes: block.size ?? null,
+      sizeBytes: blockResponse.size ?? null,
       transactions,
-      raw: block as unknown as Readonly<Record<string, unknown>>,
+      raw: blockResponse as unknown as Readonly<Record<string, unknown>>,
     };
   }
 

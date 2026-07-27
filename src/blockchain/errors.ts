@@ -26,6 +26,20 @@ export class BlockchainConflictError extends Error {
   }
 }
 
+export class BlockchainAuthenticationRequiredError extends Error {
+  public constructor() {
+    super("Authentication required");
+    this.name = "BlockchainAuthenticationRequiredError";
+  }
+}
+
+export class BlockchainRateLimitError extends Error {
+  public constructor(public readonly retryAfterSeconds: number) {
+    super("Blockchain API rate limit exceeded");
+    this.name = "BlockchainRateLimitError";
+  }
+}
+
 const ALLOWED_ENDPOINT_HOSTS = Object.freeze([
   "api.trongrid.io",
   "api.shasta.trongrid.io",
