@@ -76,15 +76,15 @@ function extractTransactions(
       txType: contract?.type ?? "Unknown",
       fromAddress: hexToBase58Check(value?.owner_address),
       toAddress: hexToBase58Check(value?.to_address),
-      amountSun: amount !== undefined ? BigInt(amount) : null,
+      amount: amount !== undefined ? String(amount) : null,
+      fee: info?.fee !== undefined ? String(info.fee) : null,
+      amountUnit: "SUN",
+      feeUnit: "SUN",
       result: tx.ret?.[0]?.contractRet ?? null,
-      feeSun: info?.fee !== undefined ? BigInt(info.fee) : null,
-      energyUsed: info?.receipt?.energy_usage_total !== undefined
-        ? BigInt(info.receipt.energy_usage_total)
-        : null,
-      bandwidthUsed: info?.receipt?.net_usage !== undefined
-        ? BigInt(info.receipt.net_usage)
-        : null,
+      chainData: {
+        energyUsed: info?.receipt?.energy_usage_total ?? null,
+        bandwidthUsed: info?.receipt?.net_usage ?? null,
+      },
       raw: tx as unknown as Readonly<Record<string, unknown>>,
     };
   });
@@ -153,7 +153,7 @@ export class TronGridConnector implements BlockchainConnector {
       blockHash: block.blockID,
       parentHash: header.parentHash ?? "",
       timestamp: header.timestamp ?? 0,
-      witnessAddress: hexToBase58Check(header.witness_address),
+      blockProducer: hexToBase58Check(header.witness_address),
       txCount: transactions.length,
       sizeBytes: rawSize,
       transactions,

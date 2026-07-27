@@ -65,7 +65,7 @@ async function main() {
   console.log("3. Recolectando desde TronGrid...");
   const gridResult = await gridService.collectBlock(targetBlock);
   console.log(`   Hash: ${gridResult.block.blockHash}`);
-  console.log(`   Witness: ${gridResult.block.witnessAddress}`);
+  console.log(`   Block producer: ${gridResult.block.blockProducer}`);
   console.log(`   Txs: ${gridResult.transactions.length}`);
   console.log(`   Size: ${gridResult.block.sizeBytes} bytes`);
   console.log(`   Source: ${gridResult.block.collectionSource}`);
@@ -75,7 +75,7 @@ async function main() {
   console.log("4. Recolectando desde TronScan...");
   const scanResult = await scanService.collectBlock(targetBlock);
   console.log(`   Hash: ${scanResult.block.blockHash}`);
-  console.log(`   Witness: ${scanResult.block.witnessAddress}`);
+  console.log(`   Block producer: ${scanResult.block.blockProducer}`);
   console.log(`   Txs: ${scanResult.transactions.length}`);
   console.log(`   Size: ${scanResult.block.sizeBytes} bytes`);
   console.log(`   Source: ${scanResult.block.collectionSource}`);

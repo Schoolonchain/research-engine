@@ -32,11 +32,12 @@ function makeTx(overrides?: Partial<RawTransaction>): RawTransaction {
     txType: "TransferContract",
     fromAddress: "TFromAddr",
     toAddress: "TToAddr",
-    amountSun: BigInt(1_000_000),
+    amount: "1000000",
+    fee: "100000",
+    amountUnit: "SUN",
+    feeUnit: "SUN",
     result: "SUCCESS",
-    feeSun: BigInt(100_000),
-    energyUsed: null,
-    bandwidthUsed: BigInt(267),
+    chainData: { energyUsed: null, bandwidthUsed: 267 },
     raw: { test: true },
     ...overrides,
   };
@@ -48,7 +49,7 @@ function makeBlock(overrides?: Partial<RawBlock>): RawBlock {
     blockHash: "0000000002faf080",
     parentHash: "0000000002faf07f",
     timestamp: 1700000000000,
-    witnessAddress: "TWitness",
+    blockProducer: "TWitness",
     txCount: 1,
     sizeBytes: 1024,
     transactions: [makeTx()],
@@ -113,7 +114,7 @@ describe("blockchain API", () => {
       expect(body.collectionRun.status).toBe("COMPLETED");
     });
 
-    it("serializes BigInt transaction fields as strings", async () => {
+    it("serializes transaction fields with generic amount/fee and chainData", async () => {
       const response = await app.inject({
         method: "POST",
         url: "/blockchain/collect",
@@ -122,10 +123,11 @@ describe("blockchain API", () => {
 
       const body = response.json();
       expect(body.transactions).toHaveLength(1);
-      expect(body.transactions[0].amountSun).toBe("1000000");
-      expect(body.transactions[0].feeSun).toBe("100000");
-      expect(body.transactions[0].bandwidthUsed).toBe("267");
-      expect(body.transactions[0].energyUsed).toBeNull();
+      expect(body.transactions[0].amount).toBe("1000000");
+      expect(body.transactions[0].fee).toBe("100000");
+      expect(body.transactions[0].amountUnit).toBe("SUN");
+      expect(body.transactions[0].feeUnit).toBe("SUN");
+      expect(body.transactions[0].chainData).toEqual({ energyUsed: null, bandwidthUsed: 267 });
     });
 
     it("returns 409 for duplicate collection", async () => {
@@ -261,7 +263,7 @@ describe("blockchain API", () => {
       const body = response.json();
       expect(body).toHaveLength(1);
       expect(body[0].txHash).toBe("abc123def456");
-      expect(body[0].amountSun).toBe("1000000");
+      expect(body[0].amount).toBe("1000000");
     });
   });
 

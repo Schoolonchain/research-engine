@@ -171,7 +171,7 @@ describe("TronScanConnector", () => {
       expect(block.blockHash).toBe(VALID_BLOCK.hash);
       expect(block.parentHash).toBe(VALID_BLOCK.parentHash);
       expect(block.timestamp).toBe(1_700_000_000_000);
-      expect(block.witnessAddress).toBe("TRWBqiqoFZysoAeyR1J35ibuyc8EvhUAoY");
+      expect(block.blockProducer).toBe("TRWBqiqoFZysoAeyR1J35ibuyc8EvhUAoY");
       expect(block.sizeBytes).toBe(2048);
     });
 
@@ -186,11 +186,12 @@ describe("TronScanConnector", () => {
       expect(tx.txType).toBe("TransferContract");
       expect(tx.fromAddress).toBe("TSender123");
       expect(tx.toAddress).toBe("TReceiver456");
-      expect(tx.amountSun).toBe(BigInt(5_000_000));
+      expect(tx.amount).toBe("5000000");
       expect(tx.result).toBe("SUCCESS");
-      expect(tx.feeSun).toBe(BigInt(100_000));
-      expect(tx.energyUsed).toBe(BigInt(50_000));
-      expect(tx.bandwidthUsed).toBe(BigInt(267));
+      expect(tx.fee).toBe("100000");
+      expect(tx.amountUnit).toBe("SUN");
+      expect(tx.feeUnit).toBe("SUN");
+      expect(tx.chainData).toEqual({ energyUsed: 50000, bandwidthUsed: 267 });
     });
 
     it("maps numeric contract types to names", async () => {

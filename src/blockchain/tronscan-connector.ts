@@ -79,15 +79,15 @@ function extractTransactions(
         txType: contractTypeName(tx.contractType),
         fromAddress: tx.ownerAddress ?? null,
         toAddress: tx.toAddress ?? null,
-        amountSun: amount !== undefined ? BigInt(amount) : null,
+        amount: amount !== undefined ? String(amount) : null,
+        fee: tx.cost?.fee !== undefined ? String(tx.cost.fee) : null,
+        amountUnit: "SUN",
+        feeUnit: "SUN",
         result: tx.result ?? null,
-        feeSun: tx.cost?.fee !== undefined ? BigInt(tx.cost.fee) : null,
-        energyUsed: tx.cost?.energy_usage_total !== undefined
-          ? BigInt(tx.cost.energy_usage_total)
-          : null,
-        bandwidthUsed: tx.cost?.net_usage !== undefined
-          ? BigInt(tx.cost.net_usage)
-          : null,
+        chainData: {
+          energyUsed: tx.cost?.energy_usage_total ?? null,
+          bandwidthUsed: tx.cost?.net_usage ?? null,
+        },
         raw: tx as unknown as Readonly<Record<string, unknown>>,
       };
     });
@@ -150,7 +150,7 @@ export class TronScanConnector implements BlockchainConnector {
       blockHash: block.hash,
       parentHash: block.parentHash ?? "",
       timestamp: block.timestamp ?? 0,
-      witnessAddress: block.witnessAddress ?? null,
+      blockProducer: block.witnessAddress ?? null,
       txCount: transactions.length,
       sizeBytes: block.size ?? null,
       transactions,

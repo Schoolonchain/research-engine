@@ -9,7 +9,6 @@ import type {
   BlockchainNetwork,
   BlockchainTransaction,
   DataCollectionRun,
-  RawTransaction,
 } from "./model.js";
 import {
   BlockchainConflictError,
@@ -42,7 +41,7 @@ interface BlockRow {
   readonly block_hash: string;
   readonly parent_hash: string;
   readonly block_timestamp: Date;
-  readonly witness_address: string | null;
+  readonly block_producer: string | null;
   readonly tx_count: number;
   readonly size_bytes: string | null;
   readonly collection_source: string;
@@ -58,11 +57,12 @@ interface TransactionRow {
   readonly tx_type: string;
   readonly from_address: string | null;
   readonly to_address: string | null;
-  readonly amount_sun: string | null;
+  readonly amount: string | null;
+  readonly fee: string | null;
+  readonly amount_unit: string | null;
+  readonly fee_unit: string | null;
   readonly result: string | null;
-  readonly fee_sun: string | null;
-  readonly energy_used: string | null;
-  readonly bandwidth_used: string | null;
+  readonly chain_data: Record<string, unknown>;
   readonly collected_at: Date;
 }
 
@@ -112,7 +112,7 @@ function toBlock(row: BlockRow): BlockchainBlock {
     blockHash: row.block_hash,
     parentHash: row.parent_hash,
     blockTimestamp: row.block_timestamp,
-    witnessAddress: row.witness_address,
+    blockProducer: row.block_producer,
     txCount: row.tx_count,
     sizeBytes: row.size_bytes !== null ? Number(row.size_bytes) : null,
     collectionSource: row.collection_source,
@@ -130,11 +130,12 @@ function toTransaction(row: TransactionRow): BlockchainTransaction {
     txType: row.tx_type,
     fromAddress: row.from_address,
     toAddress: row.to_address,
-    amountSun: row.amount_sun !== null ? BigInt(row.amount_sun) : null,
+    amount: row.amount,
+    fee: row.fee,
+    amountUnit: row.amount_unit,
+    feeUnit: row.fee_unit,
     result: row.result,
-    feeSun: row.fee_sun !== null ? BigInt(row.fee_sun) : null,
-    energyUsed: row.energy_used !== null ? BigInt(row.energy_used) : null,
-    bandwidthUsed: row.bandwidth_used !== null ? BigInt(row.bandwidth_used) : null,
+    chainData: Object.freeze(row.chain_data),
     collectedAt: row.collected_at,
   });
 }
@@ -154,10 +155,6 @@ function toCollectionRun(row: CollectionRunRow): DataCollectionRun {
     startedAt: row.started_at,
     completedAt: row.completed_at,
   });
-}
-
-function bigintToString(value: bigint | null): string | null {
-  return value !== null ? value.toString() : null;
 }
 
 export interface CollectBlockResult {
@@ -254,14 +251,14 @@ export class BlockchainService {
       const blockResult = await tx.query<BlockRow>(
         `INSERT INTO blockchain_blocks (
           id, network_id, data_source_id, block_number, block_hash, parent_hash,
-          block_timestamp, witness_address, tx_count, size_bytes,
+          block_timestamp, block_producer, tx_count, size_bytes,
           raw_data, collection_source
         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12)
         RETURNING *`,
         [
           blockId, network.id, dataSource.id, rawBlock.blockNumber,
           rawBlock.blockHash, rawBlock.parentHash, new Date(rawBlock.timestamp),
-          rawBlock.witnessAddress, rawBlock.txCount, rawBlock.sizeBytes,
+          rawBlock.blockProducer, rawBlock.txCount, rawBlock.sizeBytes,
           JSON.stringify(rawBlock.raw), this.connector.sourceName,
         ],
       );
@@ -403,7 +400,7 @@ export class BlockchainService {
     networkId: string,
     dataSourceId: string,
     blockId: string,
-    rawTransactions: readonly RawTransaction[],
+    rawTransactions: readonly import("./model.js").RawTransaction[],
   ): Promise<BlockchainTransaction[]> {
     const results: BlockchainTransaction[] = [];
     for (const rawTx of rawTransactions) {
@@ -412,16 +409,16 @@ export class BlockchainService {
       const result = await tx.query<TransactionRow>(
         `INSERT INTO blockchain_transactions (
           id, network_id, data_source_id, block_id, tx_hash, tx_type,
-          from_address, to_address, amount_sun, result,
-          fee_sun, energy_used, bandwidth_used, raw_data
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb)
+          from_address, to_address, amount, fee,
+          amount_unit, fee_unit, result, chain_data, raw_data
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb,$15::jsonb)
         RETURNING *`,
         [
           txId, networkId, dataSourceId, blockId, rawTx.txHash, rawTx.txType,
           rawTx.fromAddress, rawTx.toAddress,
-          bigintToString(rawTx.amountSun), rawTx.result,
-          bigintToString(rawTx.feeSun), bigintToString(rawTx.energyUsed),
-          bigintToString(rawTx.bandwidthUsed), JSON.stringify(rawTx.raw),
+          rawTx.amount, rawTx.fee,
+          rawTx.amountUnit, rawTx.feeUnit, rawTx.result,
+          JSON.stringify(rawTx.chainData), JSON.stringify(rawTx.raw),
         ],
       );
       results.push(toTransaction(result.rows[0]!));

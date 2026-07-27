@@ -35,11 +35,12 @@ function makeTx(overrides?: Partial<RawTransaction>): RawTransaction {
     txType: "TransferContract",
     fromAddress: "TFromAddr1234567890",
     toAddress: "TToAddr1234567890",
-    amountSun: BigInt(1_000_000),
+    amount: "1000000",
+    fee: "100000",
+    amountUnit: "SUN",
+    feeUnit: "SUN",
     result: "SUCCESS",
-    feeSun: BigInt(100_000),
-    energyUsed: null,
-    bandwidthUsed: BigInt(267),
+    chainData: { energyUsed: null, bandwidthUsed: 267 },
     raw: { test: true },
     ...overrides,
   };
@@ -51,7 +52,7 @@ function makeBlock(overrides?: Partial<RawBlock>): RawBlock {
     blockHash: "0000000002faf0806e3b9a84730c2c8e2c45a3e78e6fc3dc79093e5b5f3b5a2c",
     parentHash: "0000000002faf07f1234567890abcdef1234567890abcdef1234567890abcdef",
     timestamp: 1700000000000,
-    witnessAddress: "TWitnessAddr1234567",
+    blockProducer: "TWitnessAddr1234567",
     txCount: 1,
     sizeBytes: 1024,
     transactions: [makeTx()],
@@ -90,8 +91,8 @@ class StubConnector implements BlockchainConnector {
       timestamp: 1700000003000,
       txCount: 2,
       transactions: [
-        makeTx({ txHash: "tx001", amountSun: BigInt(5_000_000) }),
-        makeTx({ txHash: "tx002", txType: "TriggerSmartContract", amountSun: null }),
+        makeTx({ txHash: "tx001", amount: "5000000" }),
+        makeTx({ txHash: "tx002", txType: "TriggerSmartContract", amount: null }),
       ],
     }));
   }
@@ -175,7 +176,7 @@ describe("blockchain data collection", () => {
     expect(result.block.blockHash).toBe(
       "0000000002faf0806e3b9a84730c2c8e2c45a3e78e6fc3dc79093e5b5f3b5a2c",
     );
-    expect(result.block.witnessAddress).toBe("TWitnessAddr1234567");
+    expect(result.block.blockProducer).toBe("TWitnessAddr1234567");
     expect(result.block.txCount).toBe(1);
     expect(result.block.collectionSource).toBe("TronGrid:stub");
     expect(result.block.dataSourceId).toBeDefined();
@@ -183,7 +184,7 @@ describe("blockchain data collection", () => {
     expect(result.transactions).toHaveLength(1);
     expect(result.transactions[0]!.txHash).toBe("abc123def456");
     expect(result.transactions[0]!.txType).toBe("TransferContract");
-    expect(result.transactions[0]!.amountSun).toBe(BigInt(1_000_000));
+    expect(result.transactions[0]!.amount).toBe("1000000");
     expect(result.transactions[0]!.result).toBe("SUCCESS");
     expect(result.transactions[0]!.dataSourceId).toBe(result.block.dataSourceId);
 
@@ -199,10 +200,10 @@ describe("blockchain data collection", () => {
     expect(result.block.blockNumber).toBe(50_000_001);
     expect(result.transactions).toHaveLength(2);
     expect(result.transactions[0]!.txHash).toBe("tx001");
-    expect(result.transactions[0]!.amountSun).toBe(BigInt(5_000_000));
+    expect(result.transactions[0]!.amount).toBe("5000000");
     expect(result.transactions[1]!.txHash).toBe("tx002");
     expect(result.transactions[1]!.txType).toBe("TriggerSmartContract");
-    expect(result.transactions[1]!.amountSun).toBeNull();
+    expect(result.transactions[1]!.amount).toBeNull();
     expect(result.collectionRun.txsCollected).toBe(2);
   });
 

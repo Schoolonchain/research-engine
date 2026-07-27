@@ -23,11 +23,12 @@ function serializeTransaction(tx: BlockchainTransaction): Record<string, unknown
     txType: tx.txType,
     fromAddress: tx.fromAddress,
     toAddress: tx.toAddress,
-    amountSun: tx.amountSun !== null ? tx.amountSun.toString() : null,
+    amount: tx.amount,
+    fee: tx.fee,
+    amountUnit: tx.amountUnit,
+    feeUnit: tx.feeUnit,
     result: tx.result,
-    feeSun: tx.feeSun !== null ? tx.feeSun.toString() : null,
-    energyUsed: tx.energyUsed !== null ? tx.energyUsed.toString() : null,
-    bandwidthUsed: tx.bandwidthUsed !== null ? tx.bandwidthUsed.toString() : null,
+    chainData: tx.chainData,
     collectedAt: tx.collectedAt,
   };
 }
