@@ -16,6 +16,7 @@ import {
 } from "./errors.js";
 
 const MAX_RAW_DATA_BYTES = 1_048_576;
+const MAX_TRANSACTIONS_PER_BLOCK = 10_000;
 
 function assertRawDataSize(json: string, label: string): void {
   if (json.length > MAX_RAW_DATA_BYTES) {
@@ -240,7 +241,26 @@ export class BlockchainService {
 
     const network = await this.ensureNetwork();
     const dataSource = await this.ensureDataSource(network.id);
-    const rawBlock = await this.connector.getBlock(blockNumber);
+
+    let rawBlock: import("./model.js").RawBlock;
+    try {
+      rawBlock = await this.connector.getBlock(blockNumber);
+    } catch (error) {
+      const failedRunId = randomUUID();
+      await this.database.transaction(async (tx) => {
+        await tx.query(
+          `INSERT INTO data_collection_runs (
+            id, network_id, run_type, status, source_api, block_start, block_end,
+            error_detail, completed_at
+          ) VALUES ($1, $2, 'BLOCK', 'FAILED', $3, $4, $4, $5, CURRENT_TIMESTAMP)`,
+          [
+            failedRunId, network.id, this.connector.sourceName, blockNumber,
+            error instanceof Error ? error.message : String(error),
+          ],
+        );
+      });
+      throw error;
+    }
 
     return this.database.transaction(async (tx) => {
       const duplicate = await tx.query<{ id: string }>(
@@ -421,6 +441,11 @@ export class BlockchainService {
     blockId: string,
     rawTransactions: readonly import("./model.js").RawTransaction[],
   ): Promise<BlockchainTransaction[]> {
+    if (rawTransactions.length > MAX_TRANSACTIONS_PER_BLOCK) {
+      throw new BlockchainValidationError(
+        `Block contains ${rawTransactions.length} transactions, exceeding limit of ${MAX_TRANSACTIONS_PER_BLOCK}`,
+      );
+    }
     const results: BlockchainTransaction[] = [];
     for (const rawTx of rawTransactions) {
       if (!rawTx.txHash) continue;
