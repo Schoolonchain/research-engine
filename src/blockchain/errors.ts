@@ -1,7 +1,10 @@
 export class BlockchainConnectionError extends Error {
-  public constructor(message: string) {
+  public readonly statusCode: number | undefined;
+
+  public constructor(message: string, statusCode?: number) {
     super(message);
     this.name = "BlockchainConnectionError";
+    this.statusCode = statusCode;
   }
 }
 
