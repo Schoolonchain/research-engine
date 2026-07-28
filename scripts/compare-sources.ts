@@ -75,22 +75,32 @@ async function main() {
 
   // 5. Collect same block from TronScan
   console.log("4. Recolectando desde TronScan...");
-  const scanResult = await service.collectBlock(targetBlock, "TronScan");
-  console.log(`   Hash: ${scanResult.block.blockHash}`);
-  console.log(`   Block producer: ${scanResult.block.blockProducer}`);
-  console.log(`   Txs: ${scanResult.transactions.length}`);
-  console.log(`   Size: ${scanResult.block.sizeBytes} bytes`);
-  console.log(`   Source: ${scanResult.block.collectionSource}`);
-  console.log(`   Data source ID: ${scanResult.block.dataSourceId}\n`);
+  let scanResult: typeof gridResult | null = null;
+  try {
+    scanResult = await service.collectBlock(targetBlock, "TronScan");
+    console.log(`   Hash: ${scanResult.block.blockHash}`);
+    console.log(`   Block producer: ${scanResult.block.blockProducer}`);
+    console.log(`   Txs: ${scanResult.transactions.length}`);
+    console.log(`   Size: ${scanResult.block.sizeBytes} bytes`);
+    console.log(`   Source: ${scanResult.block.collectionSource}`);
+    console.log(`   Data source ID: ${scanResult.block.dataSourceId}\n`);
+  } catch (err) {
+    console.log(`   TronScan no disponible: ${err instanceof Error ? err.message : err}`);
+    console.log("   Continuando solo con TronGrid...\n");
+  }
 
-  // 6. Compare
-  console.log("5. Comparacion:");
-  console.log(`   Mismo bloque?        ${gridResult.block.blockNumber === scanResult.block.blockNumber}`);
-  console.log(`   Mismo hash?          ${gridResult.block.blockHash === scanResult.block.blockHash}`);
-  console.log(`   Mismo parent hash?   ${gridResult.block.parentHash === scanResult.block.parentHash}`);
-  console.log(`   Mismo timestamp?     ${gridResult.block.blockTimestamp.getTime() === scanResult.block.blockTimestamp.getTime()}`);
-  console.log(`   Fuentes distintas?   ${gridResult.block.dataSourceId !== scanResult.block.dataSourceId}`);
-  console.log(`   Mismo network?       ${gridResult.block.networkId === scanResult.block.networkId}\n`);
+  // 6. Compare (if both sources available)
+  if (scanResult) {
+    console.log("5. Comparacion:");
+    console.log(`   Mismo bloque?        ${gridResult.block.blockNumber === scanResult.block.blockNumber}`);
+    console.log(`   Mismo hash?          ${gridResult.block.blockHash === scanResult.block.blockHash}`);
+    console.log(`   Mismo parent hash?   ${gridResult.block.parentHash === scanResult.block.parentHash}`);
+    console.log(`   Mismo timestamp?     ${gridResult.block.blockTimestamp.getTime() === scanResult.block.blockTimestamp.getTime()}`);
+    console.log(`   Fuentes distintas?   ${gridResult.block.dataSourceId !== scanResult.block.dataSourceId}`);
+    console.log(`   Mismo network?       ${gridResult.block.networkId === scanResult.block.networkId}\n`);
+  } else {
+    console.log("5. Comparacion omitida (solo una fuente disponible)\n");
+  }
 
   // 7. Observations query
   console.log("6. Consultando observaciones del bloque...");
@@ -113,7 +123,7 @@ async function main() {
   console.log();
 
   // 9. Transaction comparison
-  if (gridResult.transactions.length > 0 && scanResult.transactions.length > 0) {
+  if (scanResult && gridResult.transactions.length > 0 && scanResult.transactions.length > 0) {
     console.log("8. Comparacion de transacciones:");
     const gridHashes = new Set(gridResult.transactions.map((t) => t.txHash));
     const scanHashes = new Set(scanResult.transactions.map((t) => t.txHash));
@@ -132,10 +142,14 @@ async function main() {
       }
     }
     console.log();
+  } else if (!scanResult) {
+    console.log("8. Comparacion de transacciones omitida (TronScan no disponible)\n");
   }
 
-  console.log("=== MULTI-SOURCE VALIDADO ===");
-  console.log("Dos fuentes independientes, misma blockchain, observaciones coexistentes.");
+  console.log("=== COMPARACION COMPLETADA ===");
+  console.log(scanResult
+    ? "Dos fuentes independientes, misma blockchain, observaciones coexistentes."
+    : "Una fuente disponible (TronGrid). TronScan temporalmente no accesible.");
 
   await raw.close();
 }
