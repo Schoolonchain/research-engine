@@ -2,6 +2,7 @@ import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 
 import type { ActorContext } from "../proposals/model.js";
 import type { BlockchainBlock, BlockchainDataSource, BlockchainTransaction } from "./model.js";
+import type { BlockValidationResult } from "./cross-validator.js";
 import type { BlockchainService, CollectBlockResult, RangeCollectionResult } from "./blockchain-service.js";
 import type { BlockchainRateLimiter } from "./blockchain-rate-limiter.js";
 import {
@@ -85,6 +86,20 @@ function serializeRangeResult(result: RangeCollectionResult): Record<string, unk
     collected: result.collected,
     skipped: result.skipped,
     totalTransactions: result.totalTransactions,
+  };
+}
+
+function serializeValidationResult(result: BlockValidationResult): Record<string, unknown> {
+  return {
+    blockNumber: result.blockNumber,
+    networkId: result.networkId,
+    sourceCount: result.sourceCount,
+    sources: result.sources,
+    status: result.status,
+    blockDiscrepancies: result.blockDiscrepancies,
+    transactionDiscrepancies: result.transactionDiscrepancies,
+    missingTransactions: result.missingTransactions,
+    validatedAt: result.validatedAt,
   };
 }
 
@@ -192,6 +207,13 @@ export function buildBlockchainApi(
     }
     const txs = await dependencies.blockchain.getTransactionsByBlock(block.id);
     return txs.map(serializeTransaction);
+  });
+
+  application.get("/blockchain/blocks/:blockNumber/validate", async (request) => {
+    const blockNumber = parseBlockNumber(request);
+    const network = await dependencies.blockchain.ensureNetwork();
+    const result = await dependencies.blockchain.validateBlock(network.id, blockNumber);
+    return serializeValidationResult(result);
   });
 
   application.get("/blockchain/latest", async () => {

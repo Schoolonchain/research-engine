@@ -557,4 +557,142 @@ describe("blockchain data collection", () => {
       expect(events.rows[1]!.payload).toMatchObject({ dataSourceName: "DirectNode" });
     });
   });
+
+  describe("cross-validation", () => {
+    it("returns INSUFFICIENT_SOURCES for uncollected block", async () => {
+      const network = await service.ensureNetwork();
+      const result = await service.validateBlock(network.id, 99_999_999);
+      expect(result.status).toBe("INSUFFICIENT_SOURCES");
+      expect(result.sourceCount).toBe(0);
+    });
+
+    it("returns INSUFFICIENT_SOURCES for single-source block", async () => {
+      const collected = await service.collectBlock(50_000_000);
+      const result = await service.validateBlock(collected.block.networkId, 50_000_000);
+      expect(result.status).toBe("INSUFFICIENT_SOURCES");
+      expect(result.sourceCount).toBe(1);
+    });
+
+    it("returns CONSISTENT when two sources agree", async () => {
+      const connectorA = new StubConnector({
+        sourceName: "TronGrid",
+        sourceEndpoint: "https://api.trongrid.io",
+      });
+      const connectorB = new StubConnector({
+        sourceName: "DirectNode",
+        sourceType: "NODE",
+        sourceEndpoint: "grpc://tron-node.local:50051",
+      });
+      const multiService = new BlockchainService(
+        database, new ConnectorRegistry([connectorA, connectorB]), new SqlBlockchainRepository(),
+      );
+
+      await multiService.collectBlock(50_000_000, "TronGrid");
+      await multiService.collectBlock(50_000_000, "DirectNode");
+
+      const network = await multiService.ensureNetwork();
+      const result = await multiService.validateBlock(network.id, 50_000_000);
+      expect(result.status).toBe("CONSISTENT");
+      expect(result.sourceCount).toBe(2);
+      expect([...result.sources].sort()).toEqual(["DirectNode", "TronGrid"]);
+      expect(result.blockDiscrepancies).toEqual([]);
+      expect(result.transactionDiscrepancies).toEqual([]);
+      expect(result.missingTransactions).toEqual([]);
+    });
+
+    it("detects block-level discrepancy", async () => {
+      const connectorA = new StubConnector({
+        sourceName: "TronGrid",
+        sourceEndpoint: "https://api.trongrid.io",
+      });
+      const connectorB = new StubConnector({
+        sourceName: "DirectNode",
+        sourceType: "NODE",
+        sourceEndpoint: "grpc://tron-node.local:50051",
+      });
+      connectorB.blocks.set(50_000_000, makeBlock({
+        blockHash: "different-hash-from-node",
+      }));
+      const multiService = new BlockchainService(
+        database, new ConnectorRegistry([connectorA, connectorB]), new SqlBlockchainRepository(),
+      );
+
+      await multiService.collectBlock(50_000_000, "TronGrid");
+      await multiService.collectBlock(50_000_000, "DirectNode");
+
+      const network = await multiService.ensureNetwork();
+      const result = await multiService.validateBlock(network.id, 50_000_000);
+      expect(result.status).toBe("DISCREPANCY");
+      expect(result.blockDiscrepancies.length).toBeGreaterThan(0);
+      expect(result.blockDiscrepancies.find((d) => d.field === "blockHash")).toBeDefined();
+    });
+
+    it("detects transaction-level discrepancy", async () => {
+      const connectorA = new StubConnector({
+        sourceName: "TronGrid",
+        sourceEndpoint: "https://api.trongrid.io",
+      });
+      const connectorB = new StubConnector({
+        sourceName: "DirectNode",
+        sourceType: "NODE",
+        sourceEndpoint: "grpc://tron-node.local:50051",
+      });
+      connectorB.blocks.set(50_000_000, makeBlock({
+        transactions: [makeTx({ amount: "9999999" })],
+      }));
+      const multiService = new BlockchainService(
+        database, new ConnectorRegistry([connectorA, connectorB]), new SqlBlockchainRepository(),
+      );
+
+      await multiService.collectBlock(50_000_000, "TronGrid");
+      await multiService.collectBlock(50_000_000, "DirectNode");
+
+      const network = await multiService.ensureNetwork();
+      const result = await multiService.validateBlock(network.id, 50_000_000);
+      expect(result.status).toBe("DISCREPANCY");
+      expect(result.transactionDiscrepancies).toHaveLength(1);
+      expect(result.transactionDiscrepancies[0]!.txHash).toBe("abc123def456");
+      expect(result.transactionDiscrepancies[0]!.fields.find((f) => f.field === "amount")).toBeDefined();
+    });
+
+    it("detects missing transactions between sources", async () => {
+      const connectorA = new StubConnector({
+        sourceName: "TronGrid",
+        sourceEndpoint: "https://api.trongrid.io",
+      });
+      const connectorB = new StubConnector({
+        sourceName: "DirectNode",
+        sourceType: "NODE",
+        sourceEndpoint: "grpc://tron-node.local:50051",
+      });
+      connectorB.blocks.set(50_000_000, makeBlock({
+        txCount: 2,
+        transactions: [
+          makeTx(),
+          makeTx({ txHash: "extra-tx-only-in-node", amount: "500" }),
+        ],
+      }));
+      const multiService = new BlockchainService(
+        database, new ConnectorRegistry([connectorA, connectorB]), new SqlBlockchainRepository(),
+      );
+
+      await multiService.collectBlock(50_000_000, "TronGrid");
+      await multiService.collectBlock(50_000_000, "DirectNode");
+
+      const network = await multiService.ensureNetwork();
+      const result = await multiService.validateBlock(network.id, 50_000_000);
+      expect(result.status).toBe("DISCREPANCY");
+      expect(result.missingTransactions).toHaveLength(1);
+      expect(result.missingTransactions[0]!.txHash).toBe("extra-tx-only-in-node");
+      expect(result.missingTransactions[0]!.presentIn).toContain("DirectNode");
+      expect(result.missingTransactions[0]!.missingFrom).toContain("TronGrid");
+    });
+
+    it("rejects invalid block number", async () => {
+      const network = await service.ensureNetwork();
+      await expect(service.validateBlock(network.id, -1)).rejects.toBeInstanceOf(
+        BlockchainValidationError,
+      );
+    });
+  });
 });

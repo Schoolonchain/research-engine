@@ -476,4 +476,87 @@ describe("blockchain API", () => {
       expect(body[0].sourceType).toBe("API");
     });
   });
+
+  describe("GET /blockchain/blocks/:blockNumber/validate", () => {
+    it("returns INSUFFICIENT_SOURCES for single-source block", async () => {
+      await app.inject({
+        method: "POST",
+        url: "/blockchain/collect",
+        headers: { authorization: "Bearer test-token" },
+        payload: { blockNumber: 50_000_000 },
+      });
+
+      const response = await app.inject({
+        method: "GET",
+        url: "/blockchain/blocks/50000000/validate",
+      });
+
+      expect(response.statusCode).toBe(200);
+      const body = response.json();
+      expect(body.status).toBe("INSUFFICIENT_SOURCES");
+      expect(body.sourceCount).toBe(1);
+      expect(body.blockDiscrepancies).toEqual([]);
+    });
+
+    it("returns CONSISTENT for matching multi-source block", async () => {
+      const database = new Database(raw);
+      const connectorA = new StubConnector();
+      const connectorB: BlockchainConnector = {
+        networkName: "TRON Mainnet",
+        chainId: "tron-mainnet",
+        sourceName: "NodeB:stub",
+        sourceType: "NODE",
+        sourceEndpoint: "https://stub2.test",
+        getLatestBlockNumber: async () => 50_000_100,
+        getBlock: async (n: number) => {
+          const block = connectorA.blocks.get(n);
+          if (!block) throw new Error(`Block ${n} not found`);
+          return block;
+        },
+      };
+      const multiService = new BlockchainService(
+        database, new ConnectorRegistry([connectorA, connectorB]), new SqlBlockchainRepository(),
+      );
+      const rateLimiter = new BlockchainRateLimiter(database);
+      const multiApp = buildBlockchainApi({
+        blockchain: multiService,
+        authenticate: async () => ({ actorId: "actor-1", role: "USER" }),
+        rateLimiter,
+      });
+
+      await multiApp.inject({
+        method: "POST",
+        url: "/blockchain/collect",
+        headers: { authorization: "Bearer test-token" },
+        payload: { blockNumber: 50_000_000, source: "TronGrid:stub" },
+      });
+      await multiApp.inject({
+        method: "POST",
+        url: "/blockchain/collect",
+        headers: { authorization: "Bearer test-token" },
+        payload: { blockNumber: 50_000_000, source: "NodeB:stub" },
+      });
+
+      const response = await multiApp.inject({
+        method: "GET",
+        url: "/blockchain/blocks/50000000/validate",
+      });
+
+      expect(response.statusCode).toBe(200);
+      const body = response.json();
+      expect(body.status).toBe("CONSISTENT");
+      expect(body.sourceCount).toBe(2);
+
+      await multiApp.close();
+    });
+
+    it("returns 400 for non-numeric block number", async () => {
+      const response = await app.inject({
+        method: "GET",
+        url: "/blockchain/blocks/abc/validate",
+      });
+
+      expect(response.statusCode).toBe(400);
+    });
+  });
 });

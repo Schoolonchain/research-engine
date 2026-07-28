@@ -13,6 +13,8 @@ import type {
   DataCollectionRun,
   RawTransaction,
 } from "./model.js";
+import type { BlockValidationResult } from "./cross-validator.js";
+import { crossValidateBlock } from "./cross-validator.js";
 import {
   BlockchainConflictError,
   BlockchainValidationError,
@@ -210,6 +212,27 @@ export class BlockchainService {
     return this.database.transaction((tx) =>
       this.repository.findDataSourcesByNetwork(tx, networkId),
     );
+  }
+
+  public async validateBlock(
+    networkId: string,
+    blockNumber: number,
+  ): Promise<BlockValidationResult> {
+    if (!Number.isSafeInteger(blockNumber) || blockNumber < 0) {
+      throw new BlockchainValidationError("Block number must be a non-negative integer");
+    }
+
+    return this.database.transaction(async (tx) => {
+      const observations = await this.repository.findBlockObservations(tx, networkId, blockNumber);
+
+      const transactionsByBlock = new Map<string, readonly BlockchainTransaction[]>();
+      for (const block of observations) {
+        const txs = await this.repository.findTransactionsByBlock(tx, block.id);
+        transactionsByBlock.set(block.id, txs);
+      }
+
+      return crossValidateBlock(blockNumber, networkId, observations, transactionsByBlock);
+    });
   }
 
   public async collectRange(
