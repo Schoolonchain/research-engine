@@ -52,13 +52,13 @@ function assertBlockResponse(data: unknown, blockNumber: number): asserts data i
     throw new BlockchainConnectionError(`Invalid block response for block ${blockNumber}: not an object`);
   }
   const obj = data as Record<string, unknown>;
-  if (obj.number !== undefined && typeof obj.number !== "number") {
+  if (obj["number"] !== undefined && typeof obj["number"] !== "number") {
     throw new BlockchainConnectionError(`Invalid block response for block ${blockNumber}: block number is not a number`);
   }
-  if (obj.hash !== undefined && typeof obj.hash !== "string") {
+  if (obj["hash"] !== undefined && typeof obj["hash"] !== "string") {
     throw new BlockchainConnectionError(`Invalid block response for block ${blockNumber}: hash is not a string`);
   }
-  if (obj.timestamp !== undefined && typeof obj.timestamp !== "number") {
+  if (obj["timestamp"] !== undefined && typeof obj["timestamp"] !== "number") {
     throw new BlockchainConnectionError(`Invalid block response for block ${blockNumber}: timestamp is not a number`);
   }
 }
@@ -68,7 +68,7 @@ function assertTransactionList(data: unknown, blockNumber: number): asserts data
     throw new BlockchainConnectionError(`Invalid transaction response for block ${blockNumber}: not an object`);
   }
   const obj = data as Record<string, unknown>;
-  if (obj.data !== undefined && !Array.isArray(obj.data)) {
+  if (obj["data"] !== undefined && !Array.isArray(obj["data"])) {
     throw new BlockchainConnectionError(`Invalid transaction response for block ${blockNumber}: data is not an array`);
   }
 }
@@ -149,10 +149,10 @@ export class TronScanConnector implements BlockchainConnector {
       throw new BlockchainConnectionError("Invalid response: data is not an array");
     }
     const first = list.data[0] as Record<string, unknown> | undefined;
-    if (!first || typeof first.number !== "number") {
+    if (!first || typeof first["number"] !== "number") {
       throw new BlockchainConnectionError("Invalid response: missing block number");
     }
-    return first.number;
+    return first["number"];
   }
 
   public async getBlock(blockNumber: number): Promise<RawBlock> {

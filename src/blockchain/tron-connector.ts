@@ -61,28 +61,28 @@ function assertBlockResponse(data: unknown, blockNumber: number): asserts data i
     throw new BlockchainConnectionError(`Invalid block response for block ${blockNumber}: not an object`);
   }
   const obj = data as Record<string, unknown>;
-  if (obj.blockID !== undefined && typeof obj.blockID !== "string") {
+  if (obj["blockID"] !== undefined && typeof obj["blockID"] !== "string") {
     throw new BlockchainConnectionError(`Invalid block response for block ${blockNumber}: blockID is not a string`);
   }
-  if (obj.block_header !== undefined) {
-    if (typeof obj.block_header !== "object" || obj.block_header === null) {
+  if (obj["block_header"] !== undefined) {
+    if (typeof obj["block_header"] !== "object" || obj["block_header"] === null) {
       throw new BlockchainConnectionError(`Invalid block response for block ${blockNumber}: block_header is not an object`);
     }
-    const header = obj.block_header as Record<string, unknown>;
-    if (header.raw_data !== undefined) {
-      if (typeof header.raw_data !== "object" || header.raw_data === null) {
+    const header = obj["block_header"] as Record<string, unknown>;
+    if (header["raw_data"] !== undefined) {
+      if (typeof header["raw_data"] !== "object" || header["raw_data"] === null) {
         throw new BlockchainConnectionError(`Invalid block response for block ${blockNumber}: raw_data is not an object`);
       }
-      const raw = header.raw_data as Record<string, unknown>;
-      if (raw.number !== undefined && typeof raw.number !== "number") {
+      const raw = header["raw_data"] as Record<string, unknown>;
+      if (raw["number"] !== undefined && typeof raw["number"] !== "number") {
         throw new BlockchainConnectionError(`Invalid block response for block ${blockNumber}: block number is not a number`);
       }
-      if (raw.timestamp !== undefined && typeof raw.timestamp !== "number") {
+      if (raw["timestamp"] !== undefined && typeof raw["timestamp"] !== "number") {
         throw new BlockchainConnectionError(`Invalid block response for block ${blockNumber}: timestamp is not a number`);
       }
     }
   }
-  if (obj.transactions !== undefined && !Array.isArray(obj.transactions)) {
+  if (obj["transactions"] !== undefined && !Array.isArray(obj["transactions"])) {
     throw new BlockchainConnectionError(`Invalid block response for block ${blockNumber}: transactions is not an array`);
   }
 }
