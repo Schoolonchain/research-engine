@@ -37,7 +37,7 @@ describe("initial database migration", () => {
   it("creates the complete Phase 1 schema and is idempotent", { timeout: 15_000 }, async () => {
     const migrations = await loadMigrations();
 
-    expect(migrations).toHaveLength(17);
+    expect(migrations).toHaveLength(18);
     await migrate(executor, migrations);
     await migrate(executor, migrations);
 
@@ -49,13 +49,15 @@ describe("initial database migration", () => {
     `);
 
     const tableNames = result.rows.map((row) => row.table_name);
-    expect(tableNames).toHaveLength(31);
+    expect(tableNames).toHaveLength(33);
     expect(tableNames).toEqual(
       expect.arrayContaining([
         "abuse_signals",
         "actors",
         "aggregate_event_counts",
         "aggregate_streams",
+        "audit_findings",
+        "audit_reports",
         "authorizations",
         "blockchain_blocks",
         "blockchain_data_sources",
