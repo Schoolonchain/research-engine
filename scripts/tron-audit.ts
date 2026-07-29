@@ -71,12 +71,16 @@ async function main() {
     }
   }
 
+  // Collect raw data for JSON export
+  const exportData: Record<string, unknown> = {};
+
   // ── Network Metrics ──
   console.log("2. Recolectando métricas de red (TronGrid)...");
   let t1 = Date.now();
+  let networkData;
   try {
     const networkCollector = new NetworkMetricsCollector(trongrid, tronscan);
-    const networkData = await networkCollector.collect();
+    networkData = await networkCollector.collect();
     const count = await orchestrator.ingestNetworkMetrics(networkData);
     totalMetrics += count;
     console.log(`   Energía fee: ${networkData.energy.energyFee} SUN`);
@@ -85,7 +89,20 @@ async function main() {
     console.log(`   Staking ratio: ${(networkData.stakingRatio * 100).toFixed(1)}%`);
     console.log(`   Top holders: ${networkData.topHolders.length}`);
     console.log(`   → ${count} métricas [${elapsed(t1)}]`);
-    await persistToSql("network", () => sqlOrchestrator.ingestNetworkMetrics(networkData));
+    await persistToSql("network", () => sqlOrchestrator.ingestNetworkMetrics(networkData!));
+
+    exportData.network = {
+      energy: networkData.energy,
+      bandwidth: networkData.bandwidth,
+      economics: networkData.economics,
+      stakingRatio: networkData.stakingRatio,
+      topHolders: networkData.topHolders.map(h => ({
+        address: h.address,
+        balance: h.balance,
+        totalFrozen: h.totalFrozen,
+        power: h.power,
+      })),
+    };
     console.log();
   } catch (err) {
     console.log(`   ERROR: ${err instanceof Error ? err.message : err}\n`);
@@ -104,6 +121,25 @@ async function main() {
     console.log(`   Votos totales: ${(govData.totalVotes / 1e6).toFixed(1)}M`);
     console.log(`   → ${count} métricas [${elapsed(t1)}]`);
     await persistToSql("governance", () => sqlOrchestrator.ingestGovernance(govData));
+
+    const topSRs = [...govData.witnesses]
+      .sort((a, b) => b.voteCount - a.voteCount)
+      .slice(0, 27);
+    exportData.governance = {
+      totalVotes: govData.totalVotes,
+      electedCount: govData.electedCount,
+      totalWitnesses: govData.witnesses.length,
+      totalProposals: govData.proposals.length,
+      topSuperRepresentatives: topSRs.map(w => ({
+        address: w.address,
+        url: w.url,
+        isElected: w.isElected,
+        voteCount: w.voteCount,
+        totalProduced: w.totalProduced,
+        totalMissed: w.totalMissed,
+        productivityPct: w.productivityPct,
+      })),
+    };
     console.log();
   } catch (err) {
     console.log(`   ERROR: ${err instanceof Error ? err.message : err}\n`);
@@ -121,6 +157,25 @@ async function main() {
     console.log(`   Delegaciones: ${resourceData.delegationSummaries.length}`);
     console.log(`   → ${count} métricas [${elapsed(t1)}]`);
     await persistToSql("resources", () => sqlOrchestrator.ingestResourceRankings(resourceData));
+
+    exportData.resources = {
+      topStakers: resourceData.topStakers.map(s => ({
+        address: s.address,
+        balance: s.balance,
+        frozenForEnergy: s.frozenForEnergy,
+        frozenForBandwidth: s.frozenForBandwidth,
+        votingPower: s.votingPower,
+        energyLimit: s.energyLimit,
+        energyUsed: s.energyUsed,
+        bandwidthLimit: s.bandwidthLimit,
+        bandwidthUsed: s.bandwidthUsed,
+      })),
+      delegations: resourceData.delegationSummaries.map(d => ({
+        address: d.address,
+        delegatedToCount: d.delegatedToCount,
+        receivedFromCount: d.receivedFromCount,
+      })),
+    };
     console.log();
   } catch (err) {
     console.log(`   ERROR: ${err instanceof Error ? err.message : err}\n`);
@@ -161,6 +216,22 @@ async function main() {
     }
     console.log(`   → ${count} métricas [${elapsed(t1)}]`);
     await persistToSql("rental", () => sqlOrchestrator.ingestEnergyRental(rentalData, null));
+
+    exportData.energyRental = {
+      platforms: rentalData.platforms.map(p => ({
+        name: p.platform.name,
+        address: p.platform.paymentAddress,
+        balance: p.accountBalance,
+        outgoingVolume: p.outgoingVolume,
+        incomingVolume: p.incomingVolume,
+        uniquePayees: p.uniquePayees,
+        uniquePayers: p.uniquePayers,
+        energyLimit: p.resources.energyLimit,
+        energyUsed: p.resources.energyUsed,
+        delegatedToCount: p.delegation.delegatedToCount,
+        receivedFromCount: p.delegation.receivedFromCount,
+      })),
+    };
     console.log();
   } catch (err) {
     console.log(`   ERROR: ${err instanceof Error ? err.message : err}\n`);
@@ -170,10 +241,10 @@ async function main() {
   console.log("7. Ejecutando análisis on-chain...");
   t1 = Date.now();
   try {
-    const networkData = await new NetworkMetricsCollector(trongrid).collect();
+    const analyticsNetworkData = networkData ?? await new NetworkMetricsCollector(trongrid).collect();
     const analytics = new OnchainAnalytics();
-    const result = analytics.compute(networkData, trc20Data);
-    const findings = analytics.analyze(networkData, trc20Data);
+    const result = analytics.compute(analyticsNetworkData, trc20Data);
+    const findings = analytics.analyze(analyticsNetworkData, trc20Data);
     const now = new Date();
 
     const analyticsCount = await orchestrator.ingestAnalytics(result, "tron-audit", now);
@@ -202,10 +273,21 @@ async function main() {
     console.log(`   → ${analyticsCount + findingsCount} métricas [${elapsed(t1)}]`);
     await persistToSql("analytics", () => sqlOrchestrator.ingestAnalytics(result, "tron-audit", now));
     await persistToSql("findings", () => sqlOrchestrator.ingestFindings(findings));
+
+    exportData.analytics = {
+      deflation: result.deflation,
+      healthScore: result.healthScore,
+      findings: findings.map(f => ({ severity: f.severity, title: f.title, description: f.description })),
+    };
     console.log();
   } catch (err) {
     console.log(`   ERROR: ${err instanceof Error ? err.message : err}\n`);
   }
+
+  // ── JSON Export ──
+  console.log("__AUDIT_JSON_START__");
+  console.log(JSON.stringify(exportData));
+  console.log("__AUDIT_JSON_END__");
 
   // ── Summary ──
   console.log("╔══════════════════════════════════════════════════╗");

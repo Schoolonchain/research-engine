@@ -81,8 +81,7 @@ export class SqlMetricStore implements MetricStore {
     if (records.length === 0) return;
 
     const PARAMS_PER_ROW = 14;
-    const MAX_PARAMS = 60_000;
-    const chunkSize = Math.floor(MAX_PARAMS / PARAMS_PER_ROW);
+    const chunkSize = 200;
 
     for (let offset = 0; offset < records.length; offset += chunkSize) {
       const chunk = records.slice(offset, offset + chunkSize);
