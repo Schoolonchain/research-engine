@@ -50,7 +50,7 @@ describe("metric-types", () => {
       metadata: null,
     });
     expect(a.id).not.toBe(b.id);
-    expect(a.id).toMatch(/^m_/);
+    expect(a.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
   });
 
   it("createMetricRecord freezes the result", () => {

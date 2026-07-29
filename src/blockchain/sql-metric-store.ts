@@ -80,35 +80,42 @@ export class SqlMetricStore implements MetricStore {
   async insertBatch(records: readonly MetricRecord[]): Promise<void> {
     if (records.length === 0) return;
 
-    const placeholders: string[] = [];
-    const values: unknown[] = [];
-    let idx = 1;
+    const PARAMS_PER_ROW = 14;
+    const MAX_PARAMS = 60_000;
+    const chunkSize = Math.floor(MAX_PARAMS / PARAMS_PER_ROW);
 
-    for (const r of records) {
-      const isNumeric = typeof r.value === "number";
-      const slots = Array.from({ length: 14 }, () => `$${idx++}`);
-      slots[12] = `${slots[12]}::jsonb`;
-      slots[13] = `${slots[13]}::jsonb`;
-      placeholders.push(`(${slots.join(", ")})`);
-      values.push(
-        r.id, r.category, r.metricName, r.blockchain, r.source,
-        isNumeric ? r.value : null,
-        isNumeric ? null : String(r.value),
-        r.unit, r.timestamp, r.blockHeight,
-        r.confidence, r.address,
-        r.rawData ? JSON.stringify(r.rawData) : null,
-        r.metadata ? JSON.stringify(r.metadata) : null,
+    for (let offset = 0; offset < records.length; offset += chunkSize) {
+      const chunk = records.slice(offset, offset + chunkSize);
+      const placeholders: string[] = [];
+      const values: unknown[] = [];
+      let idx = 1;
+
+      for (const r of chunk) {
+        const isNumeric = typeof r.value === "number";
+        const slots = Array.from({ length: 14 }, () => `$${idx++}`);
+        slots[12] = `${slots[12]}::jsonb`;
+        slots[13] = `${slots[13]}::jsonb`;
+        placeholders.push(`(${slots.join(", ")})`);
+        values.push(
+          r.id, r.category, r.metricName, r.blockchain, r.source,
+          isNumeric ? r.value : null,
+          isNumeric ? null : String(r.value),
+          r.unit, r.timestamp, r.blockHeight,
+          r.confidence, r.address,
+          r.rawData ? JSON.stringify(r.rawData) : null,
+          r.metadata ? JSON.stringify(r.metadata) : null,
+        );
+      }
+
+      await this.db.query(
+        `INSERT INTO onchain_metrics (
+          id, category, metric_name, blockchain, source,
+          value_num, value_text, unit, timestamp, block_height,
+          confidence, address, raw_data, metadata
+        ) VALUES ${placeholders.join(", ")}`,
+        values,
       );
     }
-
-    await this.db.query(
-      `INSERT INTO onchain_metrics (
-        id, category, metric_name, blockchain, source,
-        value_num, value_text, unit, timestamp, block_height,
-        confidence, address, raw_data, metadata
-      ) VALUES ${placeholders.join(", ")}`,
-      values,
-    );
   }
 
   async query(q: MetricQuery): Promise<readonly MetricRecord[]> {
