@@ -40,6 +40,7 @@ function startServer(handler: (req: IncomingMessage, res: ServerResponse) => voi
 }
 
 function stopServer(): Promise<void> {
+  server.closeAllConnections();
   return new Promise((resolve) => server.close(() => resolve()));
 }
 
