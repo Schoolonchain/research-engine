@@ -153,22 +153,33 @@ async function main() {
     const resourceData = await resourceCollector.collect();
     const count = await orchestrator.ingestResourceRankings(resourceData);
     totalMetrics += count;
-    console.log(`   Top stakers: ${resourceData.topStakers.length}`);
+    console.log(`   Top stakers (por poder): ${resourceData.topStakers.length}`);
+    console.log(`   Top consumidores energía: ${resourceData.topEnergyConsumers.length}`);
+    console.log(`   Top delegadores energía: ${resourceData.topEnergyDelegators.length}`);
     console.log(`   Delegaciones: ${resourceData.delegationSummaries.length}`);
     console.log(`   → ${count} métricas [${elapsed(t1)}]`);
     await persistToSql("resources", () => sqlOrchestrator.ingestResourceRankings(resourceData));
 
+    const mapAccount = (s: typeof resourceData.topStakers[number]) => ({
+      address: s.address,
+      balance: s.balance,
+      frozenForEnergy: s.frozenForEnergy,
+      frozenForBandwidth: s.frozenForBandwidth,
+      votingPower: s.votingPower,
+      energyLimit: s.energyLimit,
+      energyUsed: s.energyUsed,
+      bandwidthLimit: s.bandwidthLimit,
+      bandwidthUsed: s.bandwidthUsed,
+    });
+
     exportData.resources = {
-      topStakers: resourceData.topStakers.map(s => ({
-        address: s.address,
-        balance: s.balance,
-        frozenForEnergy: s.frozenForEnergy,
-        frozenForBandwidth: s.frozenForBandwidth,
-        votingPower: s.votingPower,
-        energyLimit: s.energyLimit,
-        energyUsed: s.energyUsed,
-        bandwidthLimit: s.bandwidthLimit,
-        bandwidthUsed: s.bandwidthUsed,
+      topStakers: resourceData.topStakers.map(mapAccount),
+      topEnergyConsumers: resourceData.topEnergyConsumers.map(mapAccount),
+      topEnergyDelegators: resourceData.topEnergyDelegators.map(d => ({
+        address: d.address,
+        delegatedToCount: d.delegatedToCount,
+        energyLimit: d.energyLimit,
+        energyUsed: d.energyUsed,
       })),
       delegations: resourceData.delegationSummaries.map(d => ({
         address: d.address,

@@ -96,6 +96,8 @@ describe("metric-adapters", () => {
             bandwidthUsed: 1_000,
           },
         ],
+        topEnergyConsumers: [],
+        topEnergyDelegators: [],
         delegationSummaries: [
           { address: "TStaker1", delegatedToCount: 5, receivedFromCount: 10 },
         ],

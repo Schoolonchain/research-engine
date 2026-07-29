@@ -115,11 +115,18 @@ describe("ResourceRankingsCollector", () => {
     expect(data.topStakers[0]!.bandwidthLimit).toBe(10_600);
     expect(data.topStakers[0]!.bandwidthUsed).toBe(5_100);
 
+    expect(data.topEnergyConsumers).toHaveLength(3);
+    expect(data.topEnergyConsumers[0]!.address).toBe("TStaker1");
+
     expect(data.delegationSummaries).toHaveLength(3);
     expect(data.delegationSummaries[0]!.delegatedToCount).toBe(3);
     expect(data.delegationSummaries[0]!.receivedFromCount).toBe(0);
     expect(data.delegationSummaries[1]!.delegatedToCount).toBe(0);
     expect(data.delegationSummaries[1]!.receivedFromCount).toBe(2);
+
+    expect(data.topEnergyDelegators).toHaveLength(1);
+    expect(data.topEnergyDelegators[0]!.address).toBe("TStaker1");
+    expect(data.topEnergyDelegators[0]!.delegatedToCount).toBe(3);
 
     expect(data.source).toBe("trongrid+tronscan");
   });
@@ -135,6 +142,8 @@ describe("ResourceRankingsCollector", () => {
     const data = await collector.collect();
 
     expect(data.topStakers).toHaveLength(0);
+    expect(data.topEnergyConsumers).toHaveLength(0);
+    expect(data.topEnergyDelegators).toHaveLength(0);
     expect(data.delegationSummaries).toHaveLength(0);
   });
 
@@ -150,6 +159,8 @@ describe("ResourceRankingsCollector", () => {
     const data = await collector.collect();
 
     expect(data.topStakers).toHaveLength(0);
+    expect(data.topEnergyConsumers).toHaveLength(0);
+    expect(data.topEnergyDelegators).toHaveLength(0);
     expect(data.delegationSummaries).toHaveLength(0);
   });
 

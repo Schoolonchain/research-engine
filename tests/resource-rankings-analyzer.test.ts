@@ -30,6 +30,8 @@ function makeDelegation(overrides: Partial<DelegationSummary> = {}): DelegationS
 function makeData(overrides: Partial<ResourceRankingsData> = {}): ResourceRankingsData {
   return {
     topStakers: [],
+    topEnergyConsumers: [],
+    topEnergyDelegators: [],
     delegationSummaries: [],
     collectedAt: new Date(),
     source: "test",

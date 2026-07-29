@@ -75,6 +75,8 @@ describe("MetricCollectionOrchestrator", () => {
           bandwidthUsed: 1_000,
         },
       ],
+      topEnergyConsumers: [],
+      topEnergyDelegators: [],
       delegationSummaries: [
         { address: "TS1", delegatedToCount: 5, receivedFromCount: 10 },
       ],
