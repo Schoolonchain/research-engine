@@ -92,11 +92,6 @@ export function createMetricBatch(
   );
 }
 
-let counter = 0;
-
 function generateMetricId(): string {
-  const ts = Date.now().toString(36);
-  const rand = Math.random().toString(36).slice(2, 8);
-  const seq = (counter++).toString(36);
-  return `m_${ts}_${rand}_${seq}`;
+  return crypto.randomUUID();
 }

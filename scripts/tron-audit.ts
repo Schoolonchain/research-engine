@@ -62,6 +62,15 @@ async function main() {
 
   let totalMetrics = 0;
 
+  async function persistToSql(label: string, fn: () => Promise<number>): Promise<void> {
+    try {
+      const n = await fn();
+      console.log(`   [SQL] ${n} métricas persistidas`);
+    } catch (err) {
+      console.log(`   [SQL] Warning: ${err instanceof Error ? err.message : err}`);
+    }
+  }
+
   // ── Network Metrics ──
   console.log("2. Recolectando métricas de red (TronGrid)...");
   let t1 = Date.now();
@@ -69,14 +78,15 @@ async function main() {
     const networkCollector = new NetworkMetricsCollector(trongrid, tronscan);
     const networkData = await networkCollector.collect();
     const count = await orchestrator.ingestNetworkMetrics(networkData);
-    await sqlOrchestrator.ingestNetworkMetrics(networkData);
     totalMetrics += count;
     console.log(`   Energía fee: ${networkData.energy.energyFee} SUN`);
     console.log(`   Energía total: ${(networkData.energy.totalEnergyLimit / 1e9).toFixed(1)}B`);
     console.log(`   Bandwidth total: ${(networkData.bandwidth.totalNetLimit / 1e9).toFixed(1)}B`);
     console.log(`   Staking ratio: ${(networkData.stakingRatio * 100).toFixed(1)}%`);
     console.log(`   Top holders: ${networkData.topHolders.length}`);
-    console.log(`   → ${count} métricas almacenadas [${elapsed(t1)}]\n`);
+    console.log(`   → ${count} métricas [${elapsed(t1)}]`);
+    await persistToSql("network", () => sqlOrchestrator.ingestNetworkMetrics(networkData));
+    console.log();
   } catch (err) {
     console.log(`   ERROR: ${err instanceof Error ? err.message : err}\n`);
   }
@@ -88,12 +98,13 @@ async function main() {
     const govCollector = new TronGovernanceCollector(trongrid);
     const govData = await govCollector.collect({ scope: "full" });
     const count = await orchestrator.ingestGovernance(govData);
-    await sqlOrchestrator.ingestGovernance(govData);
     totalMetrics += count;
     console.log(`   Super Representatives: ${govData.witnesses.length} (${govData.electedCount} elegidos)`);
     console.log(`   Propuestas: ${govData.proposals.length}`);
     console.log(`   Votos totales: ${(govData.totalVotes / 1e6).toFixed(1)}M`);
-    console.log(`   → ${count} métricas almacenadas [${elapsed(t1)}]\n`);
+    console.log(`   → ${count} métricas [${elapsed(t1)}]`);
+    await persistToSql("governance", () => sqlOrchestrator.ingestGovernance(govData));
+    console.log();
   } catch (err) {
     console.log(`   ERROR: ${err instanceof Error ? err.message : err}\n`);
   }
@@ -105,11 +116,12 @@ async function main() {
     const resourceCollector = new ResourceRankingsCollector(trongrid, tronscan);
     const resourceData = await resourceCollector.collect();
     const count = await orchestrator.ingestResourceRankings(resourceData);
-    await sqlOrchestrator.ingestResourceRankings(resourceData);
     totalMetrics += count;
     console.log(`   Top stakers: ${resourceData.topStakers.length}`);
     console.log(`   Delegaciones: ${resourceData.delegationSummaries.length}`);
-    console.log(`   → ${count} métricas almacenadas [${elapsed(t1)}]\n`);
+    console.log(`   → ${count} métricas [${elapsed(t1)}]`);
+    await persistToSql("resources", () => sqlOrchestrator.ingestResourceRankings(resourceData));
+    console.log();
   } catch (err) {
     console.log(`   ERROR: ${err instanceof Error ? err.message : err}\n`);
   }
@@ -122,14 +134,15 @@ async function main() {
     const trc20Collector = new Trc20RankingsCollector(tronscan);
     trc20Data = await trc20Collector.collect();
     const count = await orchestrator.ingestTrc20Rankings(trc20Data);
-    await sqlOrchestrator.ingestTrc20Rankings(trc20Data);
     totalMetrics += count;
     console.log(`   Tokens encontrados: ${trc20Data.topTokens.length}`);
     console.log(`   Análisis detallados: ${trc20Data.tokenAnalyses.length}`);
     if (trc20Data.topTokens[0]) {
       console.log(`   Top token: ${trc20Data.topTokens[0].symbol} (${(trc20Data.topTokens[0].holderCount / 1e6).toFixed(1)}M holders)`);
     }
-    console.log(`   → ${count} métricas almacenadas [${elapsed(t1)}]\n`);
+    console.log(`   → ${count} métricas [${elapsed(t1)}]`);
+    await persistToSql("trc20", () => sqlOrchestrator.ingestTrc20Rankings(trc20Data!));
+    console.log();
   } catch (err) {
     console.log(`   ERROR: ${err instanceof Error ? err.message : err}\n`);
   }
@@ -141,13 +154,14 @@ async function main() {
     const rentalCollector = new EnergyRentalCollector(trongrid, tronscan, [...KNOWN_PLATFORMS]);
     const rentalData = await rentalCollector.collect();
     const count = await orchestrator.ingestEnergyRental(rentalData, null);
-    await sqlOrchestrator.ingestEnergyRental(rentalData, null);
     totalMetrics += count;
     console.log(`   Plataformas analizadas: ${rentalData.platforms.length}`);
     for (const p of rentalData.platforms) {
       console.log(`   - ${p.platform.name}: volumen ${(p.outgoingVolume + p.incomingVolume).toLocaleString()} TRX`);
     }
-    console.log(`   → ${count} métricas almacenadas [${elapsed(t1)}]\n`);
+    console.log(`   → ${count} métricas [${elapsed(t1)}]`);
+    await persistToSql("rental", () => sqlOrchestrator.ingestEnergyRental(rentalData, null));
+    console.log();
   } catch (err) {
     console.log(`   ERROR: ${err instanceof Error ? err.message : err}\n`);
   }
@@ -163,9 +177,7 @@ async function main() {
     const now = new Date();
 
     const analyticsCount = await orchestrator.ingestAnalytics(result, "tron-audit", now);
-    await sqlOrchestrator.ingestAnalytics(result, "tron-audit", now);
     const findingsCount = await orchestrator.ingestFindings(findings);
-    await sqlOrchestrator.ingestFindings(findings);
     totalMetrics += analyticsCount + findingsCount;
 
     console.log(`   Emisión diaria: ${result.deflation.totalDailyEmissionTrx.toLocaleString()} TRX`);
@@ -187,7 +199,10 @@ async function main() {
     for (const f of findings.slice(0, 5)) {
       console.log(`   [${f.severity}] ${f.title}`);
     }
-    console.log(`   → ${analyticsCount + findingsCount} métricas almacenadas [${elapsed(t1)}]\n`);
+    console.log(`   → ${analyticsCount + findingsCount} métricas [${elapsed(t1)}]`);
+    await persistToSql("analytics", () => sqlOrchestrator.ingestAnalytics(result, "tron-audit", now));
+    await persistToSql("findings", () => sqlOrchestrator.ingestFindings(findings));
+    console.log();
   } catch (err) {
     console.log(`   ERROR: ${err instanceof Error ? err.message : err}\n`);
   }
