@@ -80,6 +80,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  server.closeAllConnections();
   await new Promise<void>((resolve) => server.close(() => resolve()));
 });
 
@@ -192,7 +193,7 @@ describe("TronGridConnector", () => {
       expect(block.blockHash).toBe(VALID_BLOCK.blockID);
       expect(block.parentHash).toBe("0000000002faf07f1234567890abcdef");
       expect(block.timestamp).toBe(1_700_000_000_000);
-      expect(block.witnessAddress).toBe("41witness");
+      expect(block.blockProducer).toBe("41witness");
     });
 
     it("parses transactions with info from gettransactioninfobyblocknum", async () => {
@@ -206,11 +207,12 @@ describe("TronGridConnector", () => {
       expect(tx.txType).toBe("TransferContract");
       expect(tx.fromAddress).toBe("41sender");
       expect(tx.toAddress).toBe("41receiver");
-      expect(tx.amountSun).toBe(BigInt(5_000_000));
+      expect(tx.amount).toBe("5000000");
       expect(tx.result).toBe("SUCCESS");
-      expect(tx.feeSun).toBe(BigInt(100_000));
-      expect(tx.energyUsed).toBe(BigInt(50_000));
-      expect(tx.bandwidthUsed).toBe(BigInt(267));
+      expect(tx.fee).toBe("100000");
+      expect(tx.amountUnit).toBe("SUN");
+      expect(tx.feeUnit).toBe("SUN");
+      expect(tx.chainData).toEqual({ energyUsed: 50000, bandwidthUsed: 267 });
     });
 
     it("handles a block with no transactions", async () => {
@@ -367,6 +369,19 @@ describe("TronGridConnector", () => {
         sourceName: "TronGrid-Secondary",
       });
       expect(c.sourceName).toBe("TronGrid-Secondary");
+    });
+
+    it("rejects HTTP endpoints for non-loopback hosts", () => {
+      expect(() => new TronGridConnector({ endpoint: "http://evil.com" })).toThrow("HTTPS");
+    });
+
+    it("rejects hosts not in the allowlist", () => {
+      expect(() => new TronGridConnector({ endpoint: "https://evil.com" })).toThrow("not in the allowlist");
+    });
+
+    it("accepts valid TronGrid endpoint", () => {
+      const c = new TronGridConnector({ endpoint: "https://api.trongrid.io" });
+      expect(c.sourceEndpoint).toBe("https://api.trongrid.io");
     });
   });
 });

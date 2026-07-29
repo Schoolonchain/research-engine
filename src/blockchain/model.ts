@@ -39,7 +39,7 @@ export interface BlockchainBlock {
   readonly blockHash: string;
   readonly parentHash: string;
   readonly blockTimestamp: Date;
-  readonly witnessAddress: string | null;
+  readonly blockProducer: string | null;
   readonly txCount: number;
   readonly sizeBytes: number | null;
   readonly collectionSource: string;
@@ -55,11 +55,12 @@ export interface BlockchainTransaction {
   readonly txType: string;
   readonly fromAddress: string | null;
   readonly toAddress: string | null;
-  readonly amountSun: bigint | null;
+  readonly amount: string | null;
+  readonly fee: string | null;
+  readonly amountUnit: string | null;
+  readonly feeUnit: string | null;
   readonly result: string | null;
-  readonly feeSun: bigint | null;
-  readonly energyUsed: bigint | null;
-  readonly bandwidthUsed: bigint | null;
+  readonly chainData: Readonly<Record<string, unknown>>;
   readonly collectedAt: Date;
 }
 
@@ -83,7 +84,7 @@ export interface RawBlock {
   readonly blockHash: string;
   readonly parentHash: string;
   readonly timestamp: number;
-  readonly witnessAddress: string | null;
+  readonly blockProducer: string | null;
   readonly txCount: number;
   readonly sizeBytes: number | null;
   readonly transactions: readonly RawTransaction[];
@@ -95,10 +96,16 @@ export interface RawTransaction {
   readonly txType: string;
   readonly fromAddress: string | null;
   readonly toAddress: string | null;
-  readonly amountSun: bigint | null;
+  readonly amount: string | null;
+  readonly fee: string | null;
+  readonly amountUnit: string;
+  readonly feeUnit: string;
   readonly result: string | null;
-  readonly feeSun: bigint | null;
-  readonly energyUsed: bigint | null;
-  readonly bandwidthUsed: bigint | null;
+  readonly chainData: Readonly<Record<string, unknown>>;
   readonly raw: Readonly<Record<string, unknown>>;
+}
+
+export interface TronChainData {
+  readonly energyUsed: number | null;
+  readonly bandwidthUsed: number | null;
 }

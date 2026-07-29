@@ -2,6 +2,8 @@ import { PGlite } from "@electric-sql/pglite";
 import { loadMigrations, migrate } from "../src/db/migrations.js";
 import { TronGridConnector } from "../src/blockchain/tron-connector.js";
 import { BlockchainService } from "../src/blockchain/blockchain-service.js";
+import { SqlBlockchainRepository } from "../src/blockchain/blockchain-repository.js";
+import { ConnectorRegistry } from "../src/blockchain/connector-registry.js";
 
 class Executor {
   constructor(private readonly db: any) {}
@@ -27,7 +29,7 @@ async function main() {
       values.length === 0 ? raw.exec(sql) : raw.query(sql, [...values]) },
     await loadMigrations(),
   );
-  console.log("   Base de datos lista con 15 migraciones\n");
+  console.log("   Base de datos lista con 16 migraciones\n");
 
   console.log("2. Conectando con TronGrid (API publica)...");
   const connector = new TronGridConnector({
@@ -44,13 +46,13 @@ async function main() {
   const targetBlock = latest - 100;
   console.log(`4. Recolectando bloque #${targetBlock.toLocaleString()}...`);
   const database = new Database(raw);
-  const service = new BlockchainService(database, connector);
+  const service = new BlockchainService(database, new ConnectorRegistry([connector]), new SqlBlockchainRepository());
   const result = await service.collectBlock(targetBlock);
 
   console.log(`   Block hash: ${result.block.blockHash}`);
   console.log(`   Parent hash: ${result.block.parentHash}`);
   console.log(`   Timestamp: ${result.block.blockTimestamp.toISOString()}`);
-  console.log(`   Witness: ${result.block.witnessAddress}`);
+  console.log(`   Block producer: ${result.block.blockProducer}`);
   console.log(`   Transacciones: ${result.transactions.length}`);
   console.log(`   Tamano: ${result.block.sizeBytes} bytes`);
   console.log(`   Data source ID: ${result.block.dataSourceId}`);
@@ -73,8 +75,8 @@ async function main() {
     console.log("7. Detalle de transacciones:");
     for (const tx of result.transactions.slice(0, 5)) {
       console.log(`   - ${tx.txHash.substring(0, 20)}... | ${tx.txType} | ${tx.result}`);
-      if (tx.amountSun !== null) console.log(`     Amount: ${tx.amountSun} SUN`);
-      if (tx.feeSun !== null) console.log(`     Fee: ${tx.feeSun} SUN`);
+      if (tx.amount !== null) console.log(`     Amount: ${tx.amount} ${tx.amountUnit}`);
+      if (tx.fee !== null) console.log(`     Fee: ${tx.fee} ${tx.feeUnit}`);
     }
     if (result.transactions.length > 5) {
       console.log(`   ... y ${result.transactions.length - 5} mas`);

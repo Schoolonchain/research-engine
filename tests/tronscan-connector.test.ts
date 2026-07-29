@@ -66,12 +66,13 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  server.closeAllConnections();
   await new Promise<void>((resolve) => server.close(() => resolve()));
 });
 
-function connector(opts?: { apiKey?: string; timeoutMs?: number }): TronScanConnector {
+function connector(opts?: { endpoint?: string; apiKey?: string; timeoutMs?: number }): TronScanConnector {
   const config: { endpoint: string; apiKey?: string; timeoutMs?: number } = {
-    endpoint: `http://127.0.0.1:${port}`,
+    endpoint: opts?.endpoint ?? `http://127.0.0.1:${port}`,
   };
   if (opts?.apiKey !== undefined) config.apiKey = opts.apiKey;
   if (opts?.timeoutMs !== undefined) config.timeoutMs = opts.timeoutMs;
@@ -171,7 +172,7 @@ describe("TronScanConnector", () => {
       expect(block.blockHash).toBe(VALID_BLOCK.hash);
       expect(block.parentHash).toBe(VALID_BLOCK.parentHash);
       expect(block.timestamp).toBe(1_700_000_000_000);
-      expect(block.witnessAddress).toBe("TRWBqiqoFZysoAeyR1J35ibuyc8EvhUAoY");
+      expect(block.blockProducer).toBe("TRWBqiqoFZysoAeyR1J35ibuyc8EvhUAoY");
       expect(block.sizeBytes).toBe(2048);
     });
 
@@ -186,11 +187,12 @@ describe("TronScanConnector", () => {
       expect(tx.txType).toBe("TransferContract");
       expect(tx.fromAddress).toBe("TSender123");
       expect(tx.toAddress).toBe("TReceiver456");
-      expect(tx.amountSun).toBe(BigInt(5_000_000));
+      expect(tx.amount).toBe("5000000");
       expect(tx.result).toBe("SUCCESS");
-      expect(tx.feeSun).toBe(BigInt(100_000));
-      expect(tx.energyUsed).toBe(BigInt(50_000));
-      expect(tx.bandwidthUsed).toBe(BigInt(267));
+      expect(tx.fee).toBe("100000");
+      expect(tx.amountUnit).toBe("SUN");
+      expect(tx.feeUnit).toBe("SUN");
+      expect(tx.chainData).toEqual({ energyUsed: 50000, bandwidthUsed: 267 });
     });
 
     it("maps numeric contract types to names", async () => {
@@ -350,6 +352,19 @@ describe("TronScanConnector", () => {
       const c = connector();
       expect(c.chainId).toBe("tron-mainnet");
       expect(c.networkName).toBe("TRON Mainnet");
+    });
+
+    it("rejects HTTP endpoints for non-loopback hosts", () => {
+      expect(() => connector({ endpoint: "http://evil.com" })).toThrow("HTTPS");
+    });
+
+    it("rejects hosts not in the allowlist", () => {
+      expect(() => connector({ endpoint: "https://evil.com" })).toThrow("not in the allowlist");
+    });
+
+    it("accepts valid TronScan endpoint", () => {
+      const c = connector({ endpoint: "https://apilist.tronscanapi.com" });
+      expect(c.sourceEndpoint).toBe("https://apilist.tronscanapi.com");
     });
   });
 });

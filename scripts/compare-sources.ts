@@ -3,6 +3,8 @@ import { loadMigrations, migrate } from "../src/db/migrations.js";
 import { TronGridConnector } from "../src/blockchain/tron-connector.js";
 import { TronScanConnector } from "../src/blockchain/tronscan-connector.js";
 import { BlockchainService } from "../src/blockchain/blockchain-service.js";
+import { SqlBlockchainRepository } from "../src/blockchain/blockchain-repository.js";
+import { ConnectorRegistry } from "../src/blockchain/connector-registry.js";
 
 class Executor {
   constructor(private readonly db: any) {}
@@ -51,21 +53,21 @@ async function main() {
   console.log(`   TronGrid: ${gridConnector.sourceName} (${gridConnector.sourceType})`);
   console.log(`   TronScan: ${scanConnector.sourceName} (${scanConnector.sourceType})\n`);
 
-  const gridService = new BlockchainService(database, gridConnector);
-  const scanService = new BlockchainService(database, scanConnector);
+  const registry = new ConnectorRegistry([gridConnector, scanConnector]);
+  const service = new BlockchainService(database, registry, new SqlBlockchainRepository());
 
   // 3. Pick a block
   console.log("2. Obteniendo ultimo bloque...");
-  const latest = await gridConnector.getLatestBlockNumber();
+  const latest = await service.getLatestBlockNumber();
   const targetBlock = latest - 200;
   console.log(`   Ultimo: #${latest.toLocaleString()}`);
   console.log(`   Target: #${targetBlock.toLocaleString()}\n`);
 
   // 4. Collect from TronGrid
   console.log("3. Recolectando desde TronGrid...");
-  const gridResult = await gridService.collectBlock(targetBlock);
+  const gridResult = await service.collectBlock(targetBlock, "TronGrid");
   console.log(`   Hash: ${gridResult.block.blockHash}`);
-  console.log(`   Witness: ${gridResult.block.witnessAddress}`);
+  console.log(`   Block producer: ${gridResult.block.blockProducer}`);
   console.log(`   Txs: ${gridResult.transactions.length}`);
   console.log(`   Size: ${gridResult.block.sizeBytes} bytes`);
   console.log(`   Source: ${gridResult.block.collectionSource}`);
@@ -73,26 +75,36 @@ async function main() {
 
   // 5. Collect same block from TronScan
   console.log("4. Recolectando desde TronScan...");
-  const scanResult = await scanService.collectBlock(targetBlock);
-  console.log(`   Hash: ${scanResult.block.blockHash}`);
-  console.log(`   Witness: ${scanResult.block.witnessAddress}`);
-  console.log(`   Txs: ${scanResult.transactions.length}`);
-  console.log(`   Size: ${scanResult.block.sizeBytes} bytes`);
-  console.log(`   Source: ${scanResult.block.collectionSource}`);
-  console.log(`   Data source ID: ${scanResult.block.dataSourceId}\n`);
+  let scanResult: typeof gridResult | null = null;
+  try {
+    scanResult = await service.collectBlock(targetBlock, "TronScan");
+    console.log(`   Hash: ${scanResult.block.blockHash}`);
+    console.log(`   Block producer: ${scanResult.block.blockProducer}`);
+    console.log(`   Txs: ${scanResult.transactions.length}`);
+    console.log(`   Size: ${scanResult.block.sizeBytes} bytes`);
+    console.log(`   Source: ${scanResult.block.collectionSource}`);
+    console.log(`   Data source ID: ${scanResult.block.dataSourceId}\n`);
+  } catch (err) {
+    console.log(`   TronScan no disponible: ${err instanceof Error ? err.message : err}`);
+    console.log("   Continuando solo con TronGrid...\n");
+  }
 
-  // 6. Compare
-  console.log("5. Comparacion:");
-  console.log(`   Mismo bloque?        ${gridResult.block.blockNumber === scanResult.block.blockNumber}`);
-  console.log(`   Mismo hash?          ${gridResult.block.blockHash === scanResult.block.blockHash}`);
-  console.log(`   Mismo parent hash?   ${gridResult.block.parentHash === scanResult.block.parentHash}`);
-  console.log(`   Mismo timestamp?     ${gridResult.block.blockTimestamp.getTime() === scanResult.block.blockTimestamp.getTime()}`);
-  console.log(`   Fuentes distintas?   ${gridResult.block.dataSourceId !== scanResult.block.dataSourceId}`);
-  console.log(`   Mismo network?       ${gridResult.block.networkId === scanResult.block.networkId}\n`);
+  // 6. Compare (if both sources available)
+  if (scanResult) {
+    console.log("5. Comparacion:");
+    console.log(`   Mismo bloque?        ${gridResult.block.blockNumber === scanResult.block.blockNumber}`);
+    console.log(`   Mismo hash?          ${gridResult.block.blockHash === scanResult.block.blockHash}`);
+    console.log(`   Mismo parent hash?   ${gridResult.block.parentHash === scanResult.block.parentHash}`);
+    console.log(`   Mismo timestamp?     ${gridResult.block.blockTimestamp.getTime() === scanResult.block.blockTimestamp.getTime()}`);
+    console.log(`   Fuentes distintas?   ${gridResult.block.dataSourceId !== scanResult.block.dataSourceId}`);
+    console.log(`   Mismo network?       ${gridResult.block.networkId === scanResult.block.networkId}\n`);
+  } else {
+    console.log("5. Comparacion omitida (solo una fuente disponible)\n");
+  }
 
   // 7. Observations query
   console.log("6. Consultando observaciones del bloque...");
-  const observations = await gridService.getBlockObservations(
+  const observations = await service.getBlockObservations(
     gridResult.block.networkId, targetBlock,
   );
   console.log(`   Total observaciones: ${observations.length}`);
@@ -103,15 +115,15 @@ async function main() {
 
   // 8. Data sources
   console.log("7. Fuentes de datos registradas:");
-  const network = await gridService.ensureNetwork();
-  const sources = await gridService.getDataSourcesForNetwork(network.id);
+  const network = await service.ensureNetwork();
+  const sources = await service.getDataSourcesForNetwork(network.id);
   for (const src of sources) {
     console.log(`   - ${src.name} (${src.sourceType}) | ${src.endpoint}`);
   }
   console.log();
 
   // 9. Transaction comparison
-  if (gridResult.transactions.length > 0 && scanResult.transactions.length > 0) {
+  if (scanResult && gridResult.transactions.length > 0 && scanResult.transactions.length > 0) {
     console.log("8. Comparacion de transacciones:");
     const gridHashes = new Set(gridResult.transactions.map((t) => t.txHash));
     const scanHashes = new Set(scanResult.transactions.map((t) => t.txHash));
@@ -121,7 +133,7 @@ async function main() {
     console.log(`   En comun:      ${common.length}`);
 
     if (common.length > 0) {
-      const txObs = await gridService.getTransactionObservations(
+      const txObs = await service.getTransactionObservations(
         gridResult.block.networkId, common[0]!,
       );
       console.log(`\n   Observaciones de tx ${common[0]!.substring(0, 20)}...:`);
@@ -130,10 +142,14 @@ async function main() {
       }
     }
     console.log();
+  } else if (!scanResult) {
+    console.log("8. Comparacion de transacciones omitida (TronScan no disponible)\n");
   }
 
-  console.log("=== MULTI-SOURCE VALIDADO ===");
-  console.log("Dos fuentes independientes, misma blockchain, observaciones coexistentes.");
+  console.log("=== COMPARACION COMPLETADA ===");
+  console.log(scanResult
+    ? "Dos fuentes independientes, misma blockchain, observaciones coexistentes."
+    : "Una fuente disponible (TronGrid). TronScan temporalmente no accesible.");
 
   await raw.close();
 }
