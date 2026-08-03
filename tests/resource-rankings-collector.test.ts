@@ -115,7 +115,7 @@ describe("ResourceRankingsCollector", () => {
     expect(data.topStakers[0]!.bandwidthLimit).toBe(10_600);
     expect(data.topStakers[0]!.bandwidthUsed).toBe(5_100);
 
-    expect(data.topEnergyConsumers).toHaveLength(3);
+    expect(data.topEnergyConsumers).toHaveLength(2);
     expect(data.topEnergyConsumers[0]!.address).toBe("TStaker1");
 
     expect(data.delegationSummaries).toHaveLength(3);

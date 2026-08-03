@@ -62,6 +62,9 @@ interface DelegationIndexResponse {
   readonly toAccounts?: readonly string[];
 }
 
+const SCAN_LIMIT = 50;
+const BATCH_SIZE = 5;
+
 export class ResourceRankingsCollector {
   constructor(
     private readonly trongrid: TronHttpClient,
@@ -69,150 +72,143 @@ export class ResourceRankingsCollector {
   ) {}
 
   async collect(): Promise<ResourceRankingsData> {
-    const [topStakers, topEnergyConsumers] = await Promise.all([
-      this.fetchTopStakers(),
-      this.fetchTopBySort("-frozenForEnergyV2"),
-    ]);
+    const rawAccounts = await this.fetchTopAccountsByPower(SCAN_LIMIT);
 
-    const allAddresses = [
-      ...new Set([
-        ...topStakers.slice(0, 10).map((s) => s.address),
-        ...topEnergyConsumers.slice(0, 10).map((s) => s.address),
-      ]),
-    ];
+    if (rawAccounts.length === 0) {
+      return Object.freeze({
+        topStakers: Object.freeze([]),
+        topEnergyConsumers: Object.freeze([]),
+        topEnergyDelegators: Object.freeze([]),
+        delegationSummaries: Object.freeze([]),
+        collectedAt: new Date(),
+        source: "trongrid+tronscan",
+      });
+    }
 
-    const delegationSummaries = await this.fetchDelegationSummaries(allAddresses);
+    const enriched: ResourceAccountData[] = [];
+    const delegators: EnergyDelegator[] = [];
+    const summaries: DelegationSummary[] = [];
 
-    const topEnergyDelegators = await this.fetchTopDelegators(
-      topEnergyConsumers.filter((a) => a.energyLimit > 0).map((a) => a.address),
-    );
+    for (let i = 0; i < rawAccounts.length; i += BATCH_SIZE) {
+      const batch = rawAccounts.slice(i, i + BATCH_SIZE);
+      const results = await Promise.all(
+        batch.map(async (acct) => {
+          const [resource, delegation] = await Promise.all([
+            this.fetchAccountResource(acct.address),
+            this.fetchDelegationIndex(acct.address),
+          ]);
+          return { acct, resource, delegation };
+        }),
+      );
+
+      for (const { acct, resource, delegation } of results) {
+        enriched.push(
+          Object.freeze({
+            address: acct.address,
+            balance: acct.balance,
+            frozenForEnergy: acct.frozenForEnergy,
+            frozenForBandwidth: acct.frozenForBandwidth,
+            votingPower: acct.power,
+            energyLimit: resource?.EnergyLimit ?? 0,
+            energyUsed: resource?.EnergyUsed ?? 0,
+            bandwidthLimit: (resource?.NetLimit ?? 0) + (resource?.freeNetLimit ?? 0),
+            bandwidthUsed: (resource?.NetUsed ?? 0) + (resource?.freeNetUsed ?? 0),
+          }),
+        );
+
+        const toAccounts = delegation?.toAccounts ?? [];
+        const fromAccounts = delegation?.fromAccounts ?? [];
+
+        summaries.push(
+          Object.freeze({
+            address: acct.address,
+            delegatedToCount: toAccounts.length,
+            receivedFromCount: fromAccounts.length,
+          }),
+        );
+
+        if (toAccounts.length > 0) {
+          delegators.push(
+            Object.freeze({
+              address: acct.address,
+              delegatedToCount: toAccounts.length,
+              delegatedToAddresses: Object.freeze(toAccounts),
+              energyLimit: resource?.EnergyLimit ?? 0,
+              energyUsed: resource?.EnergyUsed ?? 0,
+              balance: acct.balance,
+            }),
+          );
+        }
+      }
+    }
+
+    const topStakers = enriched.slice(0, 10);
+
+    const topEnergyConsumers = [...enriched]
+      .filter((a) => a.energyLimit > 0 || a.energyUsed > 0)
+      .sort((a, b) => b.energyLimit - a.energyLimit)
+      .slice(0, 10);
+
+    const topEnergyDelegators = [...delegators]
+      .sort((a, b) => b.delegatedToCount - a.delegatedToCount)
+      .slice(0, 10);
 
     return Object.freeze({
       topStakers: Object.freeze(topStakers),
       topEnergyConsumers: Object.freeze(topEnergyConsumers),
       topEnergyDelegators: Object.freeze(topEnergyDelegators),
-      delegationSummaries: Object.freeze(delegationSummaries),
+      delegationSummaries: Object.freeze(summaries),
       collectedAt: new Date(),
       source: "trongrid+tronscan",
     });
   }
 
-  private async fetchTopStakers(): Promise<readonly ResourceAccountData[]> {
-    return this.fetchTopBySort("-power");
-  }
-
-  private async fetchTopBySort(sort: string): Promise<readonly ResourceAccountData[]> {
+  private async fetchTopAccountsByPower(
+    limit: number,
+  ): Promise<
+    readonly { address: string; balance: number; frozenForEnergy: number; frozenForBandwidth: number; power: number }[]
+  > {
     if (!this.tronscan) return [];
 
     try {
-      const response = await this.tronscan.get<TronScanAccountResponse>(
-        "/api/account/list",
-        { sort, limit: "20", start: "0" },
-      );
+      const response = await this.tronscan.get<TronScanAccountResponse>("/api/account/list", {
+        sort: "-power",
+        limit: String(limit),
+        start: "0",
+      });
 
-      const accounts = (response.data ?? []).filter((a) => a.address);
-      const top = accounts.slice(0, 10);
-
-      const enriched = await Promise.all(
-        top.map(async (a) => {
-          const resource = await this.fetchAccountResource(a.address!);
-          return Object.freeze({
-            address: a.address!,
-            balance: (a.balance ?? 0) / 1_000_000,
-            frozenForEnergy: (a.frozenForEnergyV2 ?? 0) / 1_000_000,
-            frozenForBandwidth: (a.frozenForBandWidthV2 ?? 0) / 1_000_000,
-            votingPower: a.power ?? 0,
-            energyLimit: resource?.EnergyLimit ?? 0,
-            energyUsed: resource?.EnergyUsed ?? 0,
-            bandwidthLimit: (resource?.NetLimit ?? 0) + (resource?.freeNetLimit ?? 0),
-            bandwidthUsed: (resource?.NetUsed ?? 0) + (resource?.freeNetUsed ?? 0),
-          });
-        }),
-      );
-
-      return enriched;
+      return (response.data ?? [])
+        .filter((a) => a.address)
+        .map((a) => ({
+          address: a.address!,
+          balance: (a.balance ?? 0) / 1_000_000,
+          frozenForEnergy: (a.frozenForEnergyV2 ?? 0) / 1_000_000,
+          frozenForBandwidth: (a.frozenForBandWidthV2 ?? 0) / 1_000_000,
+          power: a.power ?? 0,
+        }));
     } catch {
       return [];
     }
   }
 
-  private async fetchTopDelegators(
-    addresses: readonly string[],
-  ): Promise<readonly EnergyDelegator[]> {
-    const delegators: EnergyDelegator[] = [];
-
-    for (const address of addresses.slice(0, 15)) {
-      try {
-        const response = await this.trongrid.post<DelegationIndexResponse>(
-          "/wallet/getdelegatedresourceaccountindexV2",
-          { value: address },
-        );
-
-        const toAccounts = response.toAccounts ?? [];
-        if (toAccounts.length > 0) {
-          const resource = await this.fetchAccountResource(address);
-          delegators.push(
-            Object.freeze({
-              address,
-              delegatedToCount: toAccounts.length,
-              delegatedToAddresses: Object.freeze(toAccounts),
-              energyLimit: resource?.EnergyLimit ?? 0,
-              energyUsed: resource?.EnergyUsed ?? 0,
-              balance: 0,
-            }),
-          );
-        }
-      } catch {
-        // skip
-      }
-    }
-
-    return delegators.sort((a, b) => b.delegatedToCount - a.delegatedToCount);
-  }
-
-  private async fetchAccountResource(
-    address: string,
-  ): Promise<AccountResourceResponse | null> {
+  private async fetchAccountResource(address: string): Promise<AccountResourceResponse | null> {
     try {
-      return await this.trongrid.post<AccountResourceResponse>(
-        "/wallet/getaccountresource",
-        { address },
-      );
+      return await this.trongrid.post<AccountResourceResponse>("/wallet/getaccountresource", {
+        address,
+      });
     } catch {
       return null;
     }
   }
 
-  private async fetchDelegationSummaries(
-    addresses: readonly string[],
-  ): Promise<readonly DelegationSummary[]> {
-    const summaries: DelegationSummary[] = [];
-
-    for (const address of addresses) {
-      try {
-        const response = await this.trongrid.post<DelegationIndexResponse>(
-          "/wallet/getdelegatedresourceaccountindexV2",
-          { value: address },
-        );
-
-        summaries.push(
-          Object.freeze({
-            address,
-            delegatedToCount: response.toAccounts?.length ?? 0,
-            receivedFromCount: response.fromAccounts?.length ?? 0,
-          }),
-        );
-      } catch {
-        summaries.push(
-          Object.freeze({
-            address,
-            delegatedToCount: 0,
-            receivedFromCount: 0,
-          }),
-        );
-      }
+  private async fetchDelegationIndex(address: string): Promise<DelegationIndexResponse | null> {
+    try {
+      return await this.trongrid.post<DelegationIndexResponse>(
+        "/wallet/getdelegatedresourceaccountindexV2",
+        { value: address },
+      );
+    } catch {
+      return null;
     }
-
-    return summaries;
   }
 }
