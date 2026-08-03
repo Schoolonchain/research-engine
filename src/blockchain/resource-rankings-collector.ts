@@ -1,5 +1,19 @@
 import type { TronHttpClient } from "./tron-http-client.js";
 
+const BASE58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+
+export function base58ToHex(base58: string): string {
+  let num = 0n;
+  for (const char of base58) {
+    const idx = BASE58_ALPHABET.indexOf(char);
+    if (idx === -1) throw new Error(`Invalid Base58 character: ${char}`);
+    num = num * 58n + BigInt(idx);
+  }
+  let hex = num.toString(16);
+  if (hex.length % 2) hex = "0" + hex;
+  return hex.slice(0, -8);
+}
+
 export interface ResourceAccountData {
   readonly address: string;
   readonly balance: number;
@@ -27,11 +41,20 @@ export interface EnergyDelegator {
   readonly balance: number;
 }
 
+export interface TopContract {
+  readonly address: string;
+  readonly name: string;
+  readonly trxCount: number;
+  readonly balance: number;
+  readonly tag: string;
+}
+
 export interface ResourceRankingsData {
   readonly topStakers: readonly ResourceAccountData[];
   readonly topEnergyConsumers: readonly ResourceAccountData[];
   readonly topEnergyDelegators: readonly EnergyDelegator[];
   readonly delegationSummaries: readonly DelegationSummary[];
+  readonly topContracts: readonly TopContract[];
   readonly collectedAt: Date;
   readonly source: string;
 }
@@ -54,6 +77,27 @@ interface AccountResourceResponse {
   readonly NetUsed?: number;
   readonly freeNetLimit?: number;
   readonly freeNetUsed?: number;
+  readonly Error?: string;
+}
+
+interface V1AccountResponse {
+  readonly data?: readonly {
+    readonly account_resource?: {
+      readonly acquired_delegated_frozenV2_balance_for_energy?: number;
+      readonly energy_usage?: number;
+      readonly latest_consume_time_for_energy?: number;
+    };
+  }[];
+}
+
+interface TronScanContractsResponse {
+  readonly data?: readonly {
+    readonly address?: string;
+    readonly name?: string;
+    readonly trxCount?: number;
+    readonly balance?: number;
+    readonly tag1?: string;
+  }[];
 }
 
 interface DelegationIndexResponse {
@@ -72,7 +116,10 @@ export class ResourceRankingsCollector {
   ) {}
 
   async collect(): Promise<ResourceRankingsData> {
-    const rawAccounts = await this.fetchTopAccountsByPower(SCAN_LIMIT);
+    const [rawAccounts, topContracts] = await Promise.all([
+      this.fetchTopAccountsByPower(SCAN_LIMIT),
+      this.fetchTopContracts(20),
+    ]);
 
     if (rawAccounts.length === 0) {
       return Object.freeze({
@@ -80,6 +127,7 @@ export class ResourceRankingsCollector {
         topEnergyConsumers: Object.freeze([]),
         topEnergyDelegators: Object.freeze([]),
         delegationSummaries: Object.freeze([]),
+        topContracts: Object.freeze(topContracts),
         collectedAt: new Date(),
         source: "trongrid+tronscan",
       });
@@ -93,15 +141,21 @@ export class ResourceRankingsCollector {
       const batch = rawAccounts.slice(i, i + BATCH_SIZE);
       const results = await Promise.all(
         batch.map(async (acct) => {
-          const [resource, delegation] = await Promise.all([
-            this.fetchAccountResource(acct.address),
-            this.fetchDelegationIndex(acct.address),
+          const hexAddr = base58ToHex(acct.address);
+          const [resource, v1Data, delegation] = await Promise.all([
+            this.fetchAccountResource(hexAddr),
+            this.fetchV1AccountResource(acct.address),
+            this.fetchDelegationIndex(hexAddr),
           ]);
-          return { acct, resource, delegation };
+          return { acct, resource, v1Data, delegation };
         }),
       );
 
-      for (const { acct, resource, delegation } of results) {
+      for (const { acct, resource, v1Data, delegation } of results) {
+        const energyLimit = resource?.EnergyLimit ?? 0;
+        const energyUsed = resource?.EnergyUsed ?? v1Data?.energy_usage ?? 0;
+        const hasDelegatedEnergy = (v1Data?.acquired_delegated_frozenV2_balance_for_energy ?? 0) > 0;
+
         enriched.push(
           Object.freeze({
             address: acct.address,
@@ -109,8 +163,8 @@ export class ResourceRankingsCollector {
             frozenForEnergy: acct.frozenForEnergy,
             frozenForBandwidth: acct.frozenForBandwidth,
             votingPower: acct.power,
-            energyLimit: resource?.EnergyLimit ?? 0,
-            energyUsed: resource?.EnergyUsed ?? 0,
+            energyLimit,
+            energyUsed,
             bandwidthLimit: (resource?.NetLimit ?? 0) + (resource?.freeNetLimit ?? 0),
             bandwidthUsed: (resource?.NetUsed ?? 0) + (resource?.freeNetUsed ?? 0),
           }),
@@ -118,12 +172,13 @@ export class ResourceRankingsCollector {
 
         const toAccounts = delegation?.toAccounts ?? [];
         const fromAccounts = delegation?.fromAccounts ?? [];
+        const receivedFromCount = fromAccounts.length > 0 ? fromAccounts.length : (hasDelegatedEnergy ? 1 : 0);
 
         summaries.push(
           Object.freeze({
             address: acct.address,
             delegatedToCount: toAccounts.length,
-            receivedFromCount: fromAccounts.length,
+            receivedFromCount,
           }),
         );
 
@@ -133,8 +188,8 @@ export class ResourceRankingsCollector {
               address: acct.address,
               delegatedToCount: toAccounts.length,
               delegatedToAddresses: Object.freeze(toAccounts),
-              energyLimit: resource?.EnergyLimit ?? 0,
-              energyUsed: resource?.EnergyUsed ?? 0,
+              energyLimit,
+              energyUsed,
               balance: acct.balance,
             }),
           );
@@ -158,6 +213,7 @@ export class ResourceRankingsCollector {
       topEnergyConsumers: Object.freeze(topEnergyConsumers),
       topEnergyDelegators: Object.freeze(topEnergyDelegators),
       delegationSummaries: Object.freeze(summaries),
+      topContracts: Object.freeze(topContracts),
       collectedAt: new Date(),
       source: "trongrid+tronscan",
     });
@@ -191,24 +247,61 @@ export class ResourceRankingsCollector {
     }
   }
 
-  private async fetchAccountResource(address: string): Promise<AccountResourceResponse | null> {
+  private async fetchAccountResource(hexAddress: string): Promise<AccountResourceResponse | null> {
     try {
-      return await this.trongrid.post<AccountResourceResponse>("/wallet/getaccountresource", {
-        address,
+      const resp = await this.trongrid.post<AccountResourceResponse>("/wallet/getaccountresource", {
+        address: hexAddress,
       });
+      if (resp.Error) return null;
+      return resp;
     } catch {
       return null;
     }
   }
 
-  private async fetchDelegationIndex(address: string): Promise<DelegationIndexResponse | null> {
+  private async fetchV1AccountResource(
+    base58Address: string,
+  ): Promise<{ energy_usage?: number; acquired_delegated_frozenV2_balance_for_energy?: number } | null> {
+    try {
+      const resp = await this.trongrid.get<V1AccountResponse>(`/v1/accounts/${base58Address}`, {});
+      return resp.data?.[0]?.account_resource ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  private async fetchDelegationIndex(hexAddress: string): Promise<DelegationIndexResponse | null> {
     try {
       return await this.trongrid.post<DelegationIndexResponse>(
         "/wallet/getdelegatedresourceaccountindexV2",
-        { value: address },
+        { value: hexAddress },
       );
     } catch {
       return null;
+    }
+  }
+
+  private async fetchTopContracts(limit: number): Promise<readonly TopContract[]> {
+    if (!this.tronscan) return [];
+    try {
+      const resp = await this.tronscan.get<TronScanContractsResponse>("/api/contracts", {
+        sort: "-trxCount",
+        limit: String(limit),
+        start: "0",
+      });
+      return (resp.data ?? [])
+        .filter((c) => c.address)
+        .map((c) =>
+          Object.freeze({
+            address: c.address!,
+            name: c.name ?? "",
+            trxCount: c.trxCount ?? 0,
+            balance: (c.balance ?? 0) / 1_000_000,
+            tag: c.tag1 ?? "",
+          }),
+        );
+    } catch {
+      return [];
     }
   }
 }

@@ -2,13 +2,33 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { afterEach, describe, expect, it } from "vitest";
 
 import { TronHttpClient } from "../src/blockchain/tron-http-client.js";
-import { ResourceRankingsCollector } from "../src/blockchain/resource-rankings-collector.js";
+import { ResourceRankingsCollector, base58ToHex } from "../src/blockchain/resource-rankings-collector.js";
+
+const ADDR1 = "TLbx1ahWJ1iXb1e8dFnPnv7GCrJx6Z2NWH";
+const ADDR2 = "TMuA6YqfCeX8EhbfYEbZM9H2JnGhQZo8FE";
+const ADDR3 = "TNkR6L3VDhMmKDeCzFXg3rkYNS3VKNJCbL";
+const ADDR4 = "TJgEFm5TnQqVotS2rxrL4KBdNPmEfas9gH";
+
+const HEX1 = base58ToHex(ADDR1);
+const HEX2 = base58ToHex(ADDR2);
+const HEX3 = base58ToHex(ADDR3);
+
+const hexToBase58 = new Map([
+  [HEX1, ADDR1],
+  [HEX2, ADDR2],
+  [HEX3, ADDR3],
+  [base58ToHex(ADDR4), ADDR4],
+]);
+
+function resolveAddress(addrOrHex: string): string {
+  return hexToBase58.get(addrOrHex) ?? addrOrHex;
+}
 
 function accountListResponse() {
   return {
     data: [
       {
-        address: "TStaker1",
+        address: ADDR1,
         balance: 500_000_000_000_000,
         totalFrozenV2: 300_000_000_000_000,
         frozenForEnergyV2: 200_000_000_000_000,
@@ -16,7 +36,7 @@ function accountListResponse() {
         power: 300_000_000,
       },
       {
-        address: "TStaker2",
+        address: ADDR2,
         balance: 200_000_000_000_000,
         totalFrozenV2: 150_000_000_000_000,
         frozenForEnergyV2: 100_000_000_000_000,
@@ -24,7 +44,7 @@ function accountListResponse() {
         power: 150_000_000,
       },
       {
-        address: "TStaker3",
+        address: ADDR3,
         balance: 100_000_000_000_000,
         totalFrozenV2: 0,
         frozenForEnergyV2: 0,
@@ -37,21 +57,32 @@ function accountListResponse() {
 }
 
 function accountResourceResponse(address: string) {
+  const addr = resolveAddress(address);
   const resources: Record<string, object> = {
-    TStaker1: { EnergyLimit: 50_000_000, EnergyUsed: 30_000_000, NetLimit: 10_000, NetUsed: 5_000, freeNetLimit: 600, freeNetUsed: 100 },
-    TStaker2: { EnergyLimit: 20_000_000, EnergyUsed: 100_000, NetLimit: 5_000, NetUsed: 1_000, freeNetLimit: 600, freeNetUsed: 50 },
-    TStaker3: { EnergyLimit: 0, EnergyUsed: 0, NetLimit: 0, NetUsed: 0, freeNetLimit: 600, freeNetUsed: 0 },
+    [ADDR1]: { EnergyLimit: 50_000_000, EnergyUsed: 30_000_000, NetLimit: 10_000, NetUsed: 5_000, freeNetLimit: 600, freeNetUsed: 100 },
+    [ADDR2]: { EnergyLimit: 20_000_000, EnergyUsed: 100_000, NetLimit: 5_000, NetUsed: 1_000, freeNetLimit: 600, freeNetUsed: 50 },
+    [ADDR3]: { EnergyLimit: 0, EnergyUsed: 0, NetLimit: 0, NetUsed: 0, freeNetLimit: 600, freeNetUsed: 0 },
   };
-  return resources[address] ?? {};
+  return resources[addr] ?? {};
 }
 
 function delegationIndexResponse(address: string) {
+  const addr = resolveAddress(address);
   const delegations: Record<string, object> = {
-    TStaker1: { account: address, toAccounts: ["TDel1", "TDel2", "TDel3"], fromAccounts: [] },
-    TStaker2: { account: address, toAccounts: [], fromAccounts: ["TFrom1", "TFrom2"] },
-    TStaker3: { account: address, toAccounts: [], fromAccounts: [] },
+    [ADDR1]: { account: addr, toAccounts: ["TDel1", "TDel2", "TDel3"], fromAccounts: [] },
+    [ADDR2]: { account: addr, toAccounts: [], fromAccounts: ["TFrom1", "TFrom2"] },
+    [ADDR3]: { account: addr, toAccounts: [], fromAccounts: [] },
   };
-  return delegations[address] ?? { account: address };
+  return delegations[addr] ?? { account: addr };
+}
+
+function v1AccountResponse(address: string) {
+  const v1Data: Record<string, object> = {
+    [ADDR1]: { data: [{ account_resource: { energy_usage: 30_000_000 } }], success: true },
+    [ADDR2]: { data: [{ account_resource: { acquired_delegated_frozenV2_balance_for_energy: 5_000_000 } }], success: true },
+    [ADDR3]: { data: [{ account_resource: {} }], success: true },
+  };
+  return v1Data[address] ?? { data: [], success: true };
 }
 
 let server: Server;
@@ -71,34 +102,44 @@ function stopServer(): Promise<void> {
   return new Promise((resolve) => server.close(() => resolve()));
 }
 
+function fullHandler(req: IncomingMessage, res: ServerResponse) {
+  const url = req.url?.split("?")[0] ?? "";
+  let body = "";
+  req.on("data", (chunk: Buffer) => { body += chunk.toString(); });
+  req.on("end", () => {
+    res.setHeader("Content-Type", "application/json");
+    if (url === "/api/account/list") {
+      res.writeHead(200);
+      res.end(JSON.stringify(accountListResponse()));
+    } else if (url === "/api/contracts") {
+      res.writeHead(200);
+      res.end(JSON.stringify({ data: [] }));
+    } else if (url === "/wallet/getaccountresource") {
+      const parsed = JSON.parse(body) as { address: string };
+      res.writeHead(200);
+      res.end(JSON.stringify(accountResourceResponse(parsed.address)));
+    } else if (url === "/wallet/getdelegatedresourceaccountindexV2") {
+      const parsed = JSON.parse(body) as { value: string };
+      res.writeHead(200);
+      res.end(JSON.stringify(delegationIndexResponse(parsed.value)));
+    } else if (url.startsWith("/v1/accounts/")) {
+      const addr = url.replace("/v1/accounts/", "");
+      res.writeHead(200);
+      res.end(JSON.stringify(v1AccountResponse(addr)));
+    } else {
+      res.writeHead(404);
+      res.end("{}");
+    }
+  });
+}
+
 describe("ResourceRankingsCollector", () => {
   afterEach(async () => {
     if (server) await stopServer();
   });
 
   it("collects top stakers with energy data and delegation summaries", async () => {
-    const port = await startServer((req, res) => {
-      const url = req.url?.split("?")[0];
-      let body = "";
-      req.on("data", (chunk: Buffer) => { body += chunk.toString(); });
-      req.on("end", () => {
-        if (url === "/api/account/list") {
-          res.writeHead(200, { "Content-Type": "application/json" });
-          res.end(JSON.stringify(accountListResponse()));
-        } else if (url === "/wallet/getaccountresource") {
-          const parsed = JSON.parse(body) as { address: string };
-          res.writeHead(200, { "Content-Type": "application/json" });
-          res.end(JSON.stringify(accountResourceResponse(parsed.address)));
-        } else if (url === "/wallet/getdelegatedresourceaccountindexV2") {
-          const parsed = JSON.parse(body) as { value: string };
-          res.writeHead(200, { "Content-Type": "application/json" });
-          res.end(JSON.stringify(delegationIndexResponse(parsed.value)));
-        } else {
-          res.writeHead(404);
-          res.end();
-        }
-      });
-    });
+    const port = await startServer(fullHandler);
 
     const gridClient = new TronHttpClient({ endpoint: `http://127.0.0.1:${port}` });
     const scanClient = new TronHttpClient({ endpoint: `http://127.0.0.1:${port}` });
@@ -106,7 +147,7 @@ describe("ResourceRankingsCollector", () => {
     const data = await collector.collect();
 
     expect(data.topStakers).toHaveLength(3);
-    expect(data.topStakers[0]!.address).toBe("TStaker1");
+    expect(data.topStakers[0]!.address).toBe(ADDR1);
     expect(data.topStakers[0]!.balance).toBe(500_000_000);
     expect(data.topStakers[0]!.frozenForEnergy).toBe(200_000_000);
     expect(data.topStakers[0]!.frozenForBandwidth).toBe(100_000_000);
@@ -116,7 +157,7 @@ describe("ResourceRankingsCollector", () => {
     expect(data.topStakers[0]!.bandwidthUsed).toBe(5_100);
 
     expect(data.topEnergyConsumers).toHaveLength(2);
-    expect(data.topEnergyConsumers[0]!.address).toBe("TStaker1");
+    expect(data.topEnergyConsumers[0]!.address).toBe(ADDR1);
 
     expect(data.delegationSummaries).toHaveLength(3);
     expect(data.delegationSummaries[0]!.delegatedToCount).toBe(3);
@@ -125,9 +166,10 @@ describe("ResourceRankingsCollector", () => {
     expect(data.delegationSummaries[1]!.receivedFromCount).toBe(2);
 
     expect(data.topEnergyDelegators).toHaveLength(1);
-    expect(data.topEnergyDelegators[0]!.address).toBe("TStaker1");
+    expect(data.topEnergyDelegators[0]!.address).toBe(ADDR1);
     expect(data.topEnergyDelegators[0]!.delegatedToCount).toBe(3);
 
+    expect(data.topContracts).toHaveLength(0);
     expect(data.source).toBe("trongrid+tronscan");
   });
 
@@ -145,6 +187,7 @@ describe("ResourceRankingsCollector", () => {
     expect(data.topEnergyConsumers).toHaveLength(0);
     expect(data.topEnergyDelegators).toHaveLength(0);
     expect(data.delegationSummaries).toHaveLength(0);
+    expect(data.topContracts).toHaveLength(0);
   });
 
   it("returns empty stakers when TronScan fails", async () => {
@@ -166,19 +209,25 @@ describe("ResourceRankingsCollector", () => {
 
   it("handles missing energy data gracefully", async () => {
     const port = await startServer((req, res) => {
-      const url = req.url?.split("?")[0];
+      const url = req.url?.split("?")[0] ?? "";
       let body = "";
       req.on("data", (chunk: Buffer) => { body += chunk.toString(); });
       req.on("end", () => {
         if (url === "/api/account/list") {
           res.writeHead(200, { "Content-Type": "application/json" });
           res.end(JSON.stringify(accountListResponse()));
+        } else if (url === "/api/contracts") {
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ data: [] }));
         } else if (url === "/wallet/getaccountresource") {
           res.writeHead(500);
           res.end("error");
         } else if (url === "/wallet/getdelegatedresourceaccountindexV2") {
           res.writeHead(500);
           res.end("error");
+        } else if (url.startsWith("/v1/accounts/")) {
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ data: [], success: true }));
         } else {
           res.writeHead(404);
           res.end();
@@ -201,7 +250,7 @@ describe("ResourceRankingsCollector", () => {
 
   it("converts balances from SUN to TRX", async () => {
     const port = await startServer((req, res) => {
-      const url = req.url?.split("?")[0];
+      const url = req.url?.split("?")[0] ?? "";
       let body = "";
       req.on("data", (chunk: Buffer) => { body += chunk.toString(); });
       req.on("end", () => {
@@ -209,7 +258,7 @@ describe("ResourceRankingsCollector", () => {
           res.writeHead(200, { "Content-Type": "application/json" });
           res.end(JSON.stringify({
             data: [{
-              address: "TConvert1",
+              address: ADDR4,
               balance: 5_500_000,
               frozenForEnergyV2: 3_000_000,
               frozenForBandWidthV2: 1_000_000,
@@ -231,5 +280,48 @@ describe("ResourceRankingsCollector", () => {
     expect(data.topStakers[0]!.balance).toBe(5.5);
     expect(data.topStakers[0]!.frozenForEnergy).toBe(3);
     expect(data.topStakers[0]!.frozenForBandwidth).toBe(1);
+  });
+
+  it("detects delegation via v1 API when fullnode returns empty", async () => {
+    const port = await startServer((req, res) => {
+      const url = req.url?.split("?")[0] ?? "";
+      let body = "";
+      req.on("data", (chunk: Buffer) => { body += chunk.toString(); });
+      req.on("end", () => {
+        res.setHeader("Content-Type", "application/json");
+        if (url === "/api/account/list") {
+          res.writeHead(200);
+          res.end(JSON.stringify({
+            data: [{ address: ADDR2, balance: 200_000_000, power: 100 }],
+          }));
+        } else if (url === "/api/contracts") {
+          res.writeHead(200);
+          res.end(JSON.stringify({ data: [] }));
+        } else if (url === "/wallet/getaccountresource") {
+          res.writeHead(200);
+          res.end("{}");
+        } else if (url === "/wallet/getdelegatedresourceaccountindexV2") {
+          res.writeHead(200);
+          res.end(JSON.stringify({ account: ADDR2, toAccounts: [], fromAccounts: [] }));
+        } else if (url.startsWith("/v1/accounts/")) {
+          res.writeHead(200);
+          res.end(JSON.stringify({
+            data: [{ account_resource: { acquired_delegated_frozenV2_balance_for_energy: 5_000_000 } }],
+            success: true,
+          }));
+        } else {
+          res.writeHead(404);
+          res.end("{}");
+        }
+      });
+    });
+
+    const gridClient = new TronHttpClient({ endpoint: `http://127.0.0.1:${port}` });
+    const scanClient = new TronHttpClient({ endpoint: `http://127.0.0.1:${port}` });
+    const collector = new ResourceRankingsCollector(gridClient, scanClient);
+    const data = await collector.collect();
+
+    expect(data.delegationSummaries).toHaveLength(1);
+    expect(data.delegationSummaries[0]!.receivedFromCount).toBe(1);
   });
 });

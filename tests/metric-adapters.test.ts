@@ -101,6 +101,7 @@ describe("metric-adapters", () => {
         delegationSummaries: [
           { address: "TStaker1", delegatedToCount: 5, receivedFromCount: 10 },
         ],
+        topContracts: [],
         collectedAt: new Date(),
         source: "trongrid",
       };

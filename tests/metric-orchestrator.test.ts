@@ -80,6 +80,7 @@ describe("MetricCollectionOrchestrator", () => {
       delegationSummaries: [
         { address: "TS1", delegatedToCount: 5, receivedFromCount: 10 },
       ],
+      topContracts: [],
       collectedAt: new Date(),
       source: "trongrid",
     };

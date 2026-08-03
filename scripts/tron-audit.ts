@@ -157,6 +157,7 @@ async function main() {
     console.log(`   Top consumidores energía: ${resourceData.topEnergyConsumers.length}`);
     console.log(`   Top delegadores energía: ${resourceData.topEnergyDelegators.length}`);
     console.log(`   Delegaciones: ${resourceData.delegationSummaries.length}`);
+    console.log(`   Top contratos: ${resourceData.topContracts.length}`);
     console.log(`   → ${count} métricas [${elapsed(t1)}]`);
     await persistToSql("resources", () => sqlOrchestrator.ingestResourceRankings(resourceData));
 
@@ -185,6 +186,13 @@ async function main() {
         address: d.address,
         delegatedToCount: d.delegatedToCount,
         receivedFromCount: d.receivedFromCount,
+      })),
+      topContracts: resourceData.topContracts.map(c => ({
+        address: c.address,
+        name: c.name,
+        trxCount: c.trxCount,
+        balance: c.balance,
+        tag: c.tag,
       })),
     };
     console.log();

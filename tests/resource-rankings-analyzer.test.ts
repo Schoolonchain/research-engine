@@ -33,6 +33,7 @@ function makeData(overrides: Partial<ResourceRankingsData> = {}): ResourceRankin
     topEnergyConsumers: [],
     topEnergyDelegators: [],
     delegationSummaries: [],
+    topContracts: [],
     collectedAt: new Date(),
     source: "test",
     ...overrides,
