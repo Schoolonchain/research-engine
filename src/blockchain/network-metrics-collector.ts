@@ -49,6 +49,13 @@ interface ChainParamsResponse {
   }[];
 }
 
+interface AccountResourceGlobals {
+  readonly TotalEnergyLimit?: number;
+  readonly TotalEnergyWeight?: number;
+  readonly TotalNetLimit?: number;
+  readonly TotalNetWeight?: number;
+}
+
 interface TronScanAccountListResponse {
   readonly data?: readonly {
     readonly address?: string;
@@ -76,15 +83,20 @@ export class NetworkMetricsCollector {
   ) {}
 
   async collect(): Promise<TronNetworkMetrics> {
-    const params = await this.trongrid.get<ChainParamsResponse>(
-      "/wallet/getchainparameters",
-    );
+    const [params, resourceGlobals] = await Promise.all([
+      this.trongrid.get<ChainParamsResponse>("/wallet/getchainparameters"),
+      this.fetchResourceGlobals(),
+    ]);
     const pm = paramMap(params);
 
-    const totalEnergyLimit = pm.get("getTotalEnergyLimit") ?? 0;
-    const totalEnergyWeight = pm.get("getTotalEnergyWeight") ?? 0;
-    const totalNetLimit = pm.get("getTotalNetLimit") ?? 0;
-    const totalNetWeight = pm.get("getTotalNetWeight") ?? 0;
+    const totalEnergyLimit =
+      (pm.get("getTotalEnergyLimit") || resourceGlobals.TotalEnergyLimit) ?? 0;
+    const totalEnergyWeight =
+      (pm.get("getTotalEnergyWeight") || resourceGlobals.TotalEnergyWeight) ?? 0;
+    const totalNetLimit =
+      (pm.get("getTotalNetLimit") || resourceGlobals.TotalNetLimit) ?? 0;
+    const totalNetWeight =
+      (pm.get("getTotalNetWeight") || resourceGlobals.TotalNetWeight) ?? 0;
 
     const energyYieldPerTrx = totalEnergyWeight > 0
       ? totalEnergyLimit / (totalEnergyWeight / 1_000_000)
@@ -121,9 +133,16 @@ export class NetworkMetricsCollector {
 
     const topHolders = await this.fetchTopHolders();
 
-    const totalStaked = totalEnergyWeight + totalNetWeight;
-    const stakingRatio = totalStaked > 0
-      ? Math.round((totalStaked / (totalStaked + totalEnergyLimit * 1_000_000)) * 10000) / 10000
+    // totalEnergyWeight + totalNetWeight = total TRX frozen (staked) across the network.
+    // getchainparameters returns these in SUN; getaccountresource returns them in TRX.
+    // The yield formula already handles the SUN case (divides by 1M), so we normalise
+    // to TRX here by checking magnitude: values > 1 trillion are almost certainly SUN.
+    const rawStaked = totalEnergyWeight + totalNetWeight;
+    const totalStakedTrx = rawStaked > 1e12 ? rawStaked / 1_000_000 : rawStaked;
+    // Approximate total TRX supply (~86.6B). Using a constant avoids an extra API call.
+    const APPROX_TOTAL_SUPPLY_TRX = 86_600_000_000;
+    const stakingRatio = totalStakedTrx > 0
+      ? Math.round((totalStakedTrx / APPROX_TOTAL_SUPPLY_TRX) * 10000) / 10000
       : 0;
 
     return Object.freeze({
@@ -135,6 +154,20 @@ export class NetworkMetricsCollector {
       collectedAt: new Date(),
       source: "trongrid+tronscan",
     });
+  }
+
+  private async fetchResourceGlobals(): Promise<AccountResourceGlobals> {
+    try {
+      // Any valid hex address works — the response always includes global totals.
+      // TRON genesis address (410000…0) is always valid.
+      const resp = await this.trongrid.post<AccountResourceGlobals>(
+        "/wallet/getaccountresource",
+        { address: "410000000000000000000000000000000000000000" },
+      );
+      return resp;
+    } catch {
+      return {};
+    }
   }
 
   private async fetchTopHolders(): Promise<readonly AccountRanking[]> {

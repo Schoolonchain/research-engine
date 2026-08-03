@@ -66,6 +66,9 @@ describe("NetworkMetricsCollector", () => {
       if (url === "/wallet/getchainparameters") {
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify(chainParamsResponse()));
+      } else if (url === "/wallet/getaccountresource") {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({}));
       } else {
         res.writeHead(404);
         res.end();
@@ -110,15 +113,20 @@ describe("NetworkMetricsCollector", () => {
     expect(metrics.energy.energyYieldPerTrx).toBe(50000);
   });
 
-  it("returns zero yield when weight is zero", async () => {
+  it("returns zero yield when weight is zero from both sources", async () => {
     await startServer((req, res) => {
       res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({
-        chainParameter: [
-          { key: "getTotalEnergyLimit", value: 100_000 },
-          { key: "getTotalEnergyWeight", value: 0 },
-        ],
-      }));
+      const url = req.url?.split("?")[0];
+      if (url === "/wallet/getaccountresource") {
+        res.end(JSON.stringify({ TotalEnergyWeight: 0, TotalNetWeight: 0 }));
+      } else {
+        res.end(JSON.stringify({
+          chainParameter: [
+            { key: "getTotalEnergyLimit", value: 100_000 },
+            { key: "getTotalEnergyWeight", value: 0 },
+          ],
+        }));
+      }
     });
 
     const client = new TronHttpClient({ endpoint: `http://127.0.0.1:${port}` });
@@ -127,6 +135,46 @@ describe("NetworkMetricsCollector", () => {
 
     expect(metrics.energy.energyYieldPerTrx).toBe(0);
     expect(metrics.bandwidth.bandwidthYieldPerTrx).toBe(0);
+  });
+
+  it("falls back to getaccountresource globals when getchainparameters returns zero weights", async () => {
+    await startServer((req, res) => {
+      const url = req.url?.split("?")[0];
+      res.writeHead(200, { "Content-Type": "application/json" });
+      if (url === "/wallet/getchainparameters") {
+        res.end(JSON.stringify({
+          chainParameter: [
+            { key: "getEnergyFee", value: 100 },
+            { key: "getTotalEnergyLimit", value: 180_000_000_000 },
+            { key: "getTotalEnergyWeight", value: 0 },
+            { key: "getTotalNetLimit", value: 43_200_000_000 },
+            { key: "getTotalNetWeight", value: 0 },
+            { key: "getWitnessPayPerBlock", value: 16_000_000 },
+            { key: "getWitness127PayPerBlock", value: 160_000 },
+          ],
+        }));
+      } else if (url === "/wallet/getaccountresource") {
+        res.end(JSON.stringify({
+          TotalEnergyLimit: 180_000_000_000,
+          TotalEnergyWeight: 18_800_000_000,
+          TotalNetLimit: 43_200_000_000,
+          TotalNetWeight: 9_500_000_000,
+        }));
+      } else {
+        res.end("{}");
+      }
+    });
+
+    const client = new TronHttpClient({ endpoint: `http://127.0.0.1:${port}` });
+    const collector = new NetworkMetricsCollector(client);
+    const metrics = await collector.collect();
+
+    expect(metrics.energy.totalEnergyWeight).toBe(18_800_000_000);
+    expect(metrics.bandwidth.totalNetWeight).toBe(9_500_000_000);
+    expect(metrics.energy.energyYieldPerTrx).toBeGreaterThan(0);
+    expect(metrics.bandwidth.bandwidthYieldPerTrx).toBeGreaterThan(0);
+    // 28.3B TRX staked / ~86.6B supply ≈ 32.7%
+    expect(metrics.stakingRatio).toBeCloseTo(0.3268, 3);
   });
 
   it("fetches top holders from TronScan", async () => {
