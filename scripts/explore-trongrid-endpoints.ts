@@ -19,6 +19,22 @@ const tronscan = new TronHttpClient({
   timeoutMs: 15_000,
 });
 
+// ── Base58Check → Hex conversion for TronGrid fullnode API ──
+const BASE58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+
+function base58ToHex(base58: string): string {
+  let num = 0n;
+  for (const char of base58) {
+    const idx = BASE58_ALPHABET.indexOf(char);
+    if (idx === -1) throw new Error(`Invalid Base58 character: ${char}`);
+    num = num * 58n + BigInt(idx);
+  }
+  let hex = num.toString(16);
+  if (hex.length % 2) hex = "0" + hex;
+  // Remove last 8 hex chars (4-byte checksum)
+  return hex.slice(0, -8);
+}
+
 const KNOWN_ADDRESSES: { label: string; address: string }[] = [
   { label: "USDT TRC20 Contract", address: "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t" },
   { label: "SunSwap V2 Router", address: "TKzxdSv2FZKQrEqkKVgp5DcwEXBEKMg2Ax" },
@@ -36,289 +52,106 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function summarizeObj(data: unknown, depth = 0): string {
-  if (data === null || data === undefined) return "null";
-  if (typeof data !== "object") return String(data).slice(0, 200);
-  const obj = data as Record<string, unknown>;
-  const keys = Object.keys(obj);
-  if (keys.length === 0) return "{}";
-  const indent = "      " + "  ".repeat(depth);
-  const parts: string[] = [];
-  for (const k of keys.slice(0, 15)) {
-    const v = obj[k];
-    if (Array.isArray(v)) {
-      parts.push(`${indent}${k}: Array(${v.length})${v.length > 0 && typeof v[0] === "object" ? ` [0]keys=${Object.keys(v[0] as object).join(",")}` : ""}`);
-    } else if (typeof v === "object" && v !== null) {
-      parts.push(`${indent}${k}: {${Object.keys(v as Record<string, unknown>).slice(0, 8).join(", ")}}`);
-    } else {
-      parts.push(`${indent}${k}: ${JSON.stringify(v).slice(0, 100)}`);
-    }
-  }
-  if (keys.length > 15) parts.push(`${indent}... +${keys.length - 15} more keys`);
-  return parts.join("\n");
-}
-
-async function probeGridEndpoint(
-  label: string,
-  method: "GET" | "POST",
-  path: string,
-  bodyOrParams: Record<string, unknown>,
-): Promise<unknown> {
-  try {
-    let data: unknown;
-    if (method === "POST") {
-      data = await trongrid.post<unknown>(path, bodyOrParams);
-    } else {
-      const params: Record<string, string> = {};
-      for (const [k, v] of Object.entries(bodyOrParams)) params[k] = String(v);
-      data = await trongrid.get<unknown>(path, params);
-    }
-    const json = JSON.stringify(data);
-    if (json === "{}" || json === "[]") {
-      console.log(`  [EMPTY] ${label}`);
-    } else {
-      console.log(`  [OK]    ${label}`);
-      console.log(summarizeObj(data));
-    }
-    return data;
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    const code = msg.match(/(\d{3})/)?.[1] ?? "???";
-    console.log(`  [${code}]   ${label} → ${msg.slice(0, 150)}`);
-    return null;
-  }
-}
-
-async function probeScanEndpoint(
-  label: string,
-  path: string,
-  params: Record<string, string>,
-): Promise<unknown> {
-  try {
-    const data = await tronscan.get<unknown>(path, params);
-    const json = JSON.stringify(data);
-    if (json === "{}" || json === "[]" || json.includes('"data":[]') && json.includes('"total":0')) {
-      console.log(`  [EMPTY] ${label}`);
-    } else {
-      console.log(`  [OK]    ${label}`);
-      console.log(summarizeObj(data));
-    }
-    return data;
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    const code = msg.match(/(\d{3})/)?.[1] ?? "???";
-    console.log(`  [${code}]   ${label} → ${msg.slice(0, 150)}`);
-    return null;
-  }
+function fmt(n: number): string {
+  if (n >= 1e9) return `${(n / 1e9).toFixed(1)}B`;
+  if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
+  if (n >= 1e3) return `${(n / 1e3).toFixed(1)}K`;
+  return String(n);
 }
 
 async function main() {
   console.log("╔══════════════════════════════════════════════════════════════╗");
-  console.log("║   TRONGRID + TRONSCAN ENDPOINT EXPLORER (v4)               ║");
-  console.log("║   Buscando datos de energía y delegación en ambas APIs     ║");
+  console.log("║   TRONGRID + TRONSCAN EXPLORER v5                          ║");
+  console.log("║   Base58→Hex fix + v1 API + TronScan contracts             ║");
   console.log("╚══════════════════════════════════════════════════════════════╝\n");
   console.log(`TronGrid key: ${trongridKey ? "present" : "missing"}`);
   console.log(`TronScan key: ${tronscanKey ? "present" : "missing"}\n`);
 
-  // ── PART 1: TronGrid - Query known active addresses ──
+  // ── PART 1: TronGrid v1 API (works with Base58) ──
   console.log("═══════════════════════════════════════════════════");
-  console.log("PARTE 1: TronGrid — Cuentas conocidas activas");
+  console.log("PARTE 1: TronGrid v1 API — /v1/accounts/{address}");
+  console.log("(acepta Base58, devuelve account_resource y frozenV2)");
   console.log("═══════════════════════════════════════════════════\n");
 
-  for (const { label, address } of KNOWN_ADDRESSES) {
-    console.log(`\n── ${label} (${address}) ──`);
-
-    // getaccountresource - energy/bandwidth
-    await probeGridEndpoint(
-      `getaccountresource`,
-      "POST", "/wallet/getaccountresource",
-      { address },
-    );
-    await sleep(500);
-
-    // getdelegatedresourceaccountindexV2 - delegation summary
-    await probeGridEndpoint(
-      `delegation index`,
-      "POST", "/wallet/getdelegatedresourceaccountindexV2",
-      { value: address },
-    );
-    await sleep(500);
-
-    // getaccount - full account details (frozen balances, etc.)
-    await probeGridEndpoint(
-      `getaccount`,
-      "POST", "/wallet/getaccount",
-      { address },
-    );
-    await sleep(500);
+  interface V1AccountData {
+    label: string;
+    address: string;
+    balance: number;
+    frozenV2: unknown[];
+    accountResource: unknown;
+    energyWindow?: number;
   }
 
-  // ── PART 2: TronGrid - Additional endpoints ──
-  console.log("\n\n═══════════════════════════════════════════════════");
-  console.log("PARTE 2: TronGrid — Endpoints adicionales");
-  console.log("═══════════════════════════════════════════════════\n");
-
-  // TronGrid v1 API for a known address
-  const usdtAddr = KNOWN_ADDRESSES[0]!.address;
-
-  await probeGridEndpoint(
-    "v1/accounts (USDT contract)",
-    "GET", `/v1/accounts/${usdtAddr}`,
-    {},
-  );
-  await sleep(500);
-
-  await probeGridEndpoint(
-    "v1/accounts/resources (USDT)",
-    "GET", `/v1/accounts/${usdtAddr}/resources`,
-    {},
-  );
-  await sleep(500);
-
-  // getaccountnet (bandwidth-specific)
-  await probeGridEndpoint(
-    "getaccountnet (USDT)",
-    "POST", "/wallet/getaccountnet",
-    { address: usdtAddr },
-  );
-  await sleep(500);
-
-  // getdelegatedresource between two specific accounts
-  await probeGridEndpoint(
-    "getdelegatedresource (USDT→Binance)",
-    "POST", "/wallet/getdelegatedresource",
-    { fromAddress: usdtAddr, toAddress: KNOWN_ADDRESSES[5]!.address },
-  );
-  await sleep(500);
-
-  // getcanwithdrawunfreezeamount
-  await probeGridEndpoint(
-    "getcanwithdrawunfreezeamount (USDT)",
-    "POST", "/wallet/getcanwithdrawunfreezeamount",
-    { owner_address: usdtAddr },
-  );
-  await sleep(500);
-
-  // getcanDelegatedMaxSize
-  await probeGridEndpoint(
-    "getcandelegatedmaxsize (USDT)",
-    "POST", "/wallet/getcandelegatedmaxsize",
-    { owner_address: usdtAddr, type: 1 },
-  );
-  await sleep(500);
-
-  // ── PART 3: TronScan - Unexplored endpoints ──
-  console.log("\n\n═══════════════════════════════════════════════════");
-  console.log("PARTE 3: TronScan — Endpoints no explorados");
-  console.log("═══════════════════════════════════════════════════\n");
-
-  // /api/account resources-specific
-  await probeScanEndpoint(
-    "account/{addr}/resources",
-    `/api/account/resources`,
-    { address: usdtAddr },
-  );
-  await sleep(1000);
-
-  // Energy consumption ranking (maybe a different path)
-  await probeScanEndpoint(
-    "system/energy-ranking",
-    "/api/system/energy-ranking",
-    { limit: "5" },
-  );
-  await sleep(1000);
-
-  await probeScanEndpoint(
-    "resource/energy/ranking",
-    "/api/resource/energy/ranking",
-    { limit: "5" },
-  );
-  await sleep(1000);
-
-  // Account list with filter for frozen
-  await probeScanEndpoint(
-    "account/list sort=-totalFrozenV2",
-    "/api/account/list",
-    { sort: "-totalFrozenV2", limit: "5", start: "0" },
-  );
-  await sleep(1000);
-
-  // Contract calls (high energy use = high contract activity)
-  await probeScanEndpoint(
-    "contracts/daily-analytics (USDT)",
-    "/api/contract/daily-analytics",
-    { contract: usdtAddr, limit: "3" },
-  );
-  await sleep(1000);
-
-  // Contract info
-  await probeScanEndpoint(
-    "contract info (USDT)",
-    "/api/contract",
-    { contract: usdtAddr },
-  );
-  await sleep(1000);
-
-  // /api/contracts (list contracts)
-  await probeScanEndpoint(
-    "contracts list sort=-trxCount",
-    "/api/contracts",
-    { sort: "-trxCount", limit: "5", start: "0" },
-  );
-  await sleep(1000);
-
-  await probeScanEndpoint(
-    "contracts list sort=-callValue",
-    "/api/contracts",
-    { sort: "-callValue", limit: "5", start: "0" },
-  );
-  await sleep(1000);
-
-  await probeScanEndpoint(
-    "contracts list sort=-balance",
-    "/api/contracts",
-    { sort: "-balance", limit: "5", start: "0" },
-  );
-  await sleep(1000);
-
-  // Token holder rankings (holders of USDT = active addresses)
-  await probeScanEndpoint(
-    "token_trc20/holder (USDT top holders)",
-    "/api/token_trc20/holders",
-    { contract_address: usdtAddr, limit: "5", start: "0" },
-  );
-  await sleep(1000);
-
-  // Staking/delegation specific
-  await probeScanEndpoint(
-    "freezev2/list",
-    "/api/freezev2/list",
-    { sort: "-frozen_balance", limit: "5", start: "0" },
-  );
-  await sleep(1000);
-
-  await probeScanEndpoint(
-    "resources/delegation",
-    "/api/resources/delegation",
-    { limit: "5" },
-  );
-  await sleep(1000);
-
-  await probeScanEndpoint(
-    "stake2.0/resource/list",
-    "/api/stake2.0/resource/list",
-    { limit: "5", sort: "-energy" },
-  );
-  await sleep(1000);
-
-  // ── PART 4: Summary of energy data from known addresses ──
-  console.log("\n\n═══════════════════════════════════════════════════");
-  console.log("PARTE 4: Resumen de datos de energía encontrados");
-  console.log("═══════════════════════════════════════════════════\n");
-
-  const energyResults: { label: string; address: string; energyLimit: number; energyUsed: number; netLimit: number; delegatedTo: number; receivedFrom: number }[] = [];
+  const v1Results: V1AccountData[] = [];
 
   for (const { label, address } of KNOWN_ADDRESSES) {
+    try {
+      const resp = await trongrid.get<{
+        data?: {
+          address?: string;
+          balance?: number;
+          frozenV2?: unknown[];
+          account_resource?: unknown;
+          net_window_size?: number;
+        }[];
+        success?: boolean;
+      }>(`/v1/accounts/${address}`, {});
+
+      const acct = resp.data?.[0];
+      if (acct) {
+        v1Results.push({
+          label,
+          address,
+          balance: acct.balance ?? 0,
+          frozenV2: acct.frozenV2 ?? [],
+          accountResource: acct.account_resource ?? {},
+          energyWindow: acct.net_window_size,
+        });
+        console.log(`  [OK] ${label}`);
+        console.log(`       balance: ${fmt(acct.balance ?? 0)} SUN (${((acct.balance ?? 0) / 1e6).toFixed(1)} TRX)`);
+        console.log(`       frozenV2: ${JSON.stringify(acct.frozenV2 ?? []).slice(0, 300)}`);
+        console.log(`       account_resource: ${JSON.stringify(acct.account_resource ?? {}).slice(0, 300)}`);
+      } else {
+        console.log(`  [EMPTY] ${label} — no data returned`);
+      }
+    } catch (err) {
+      console.log(`  [ERROR] ${label}: ${err instanceof Error ? err.message : err}`);
+    }
+    await sleep(300);
+  }
+
+  // ── PART 2: TronGrid fullnode with HEX addresses ──
+  console.log("\n\n═══════════════════════════════════════════════════");
+  console.log("PARTE 2: TronGrid fullnode — direcciones HEX");
+  console.log("(getaccountresource + getdelegatedresourceaccountindexV2)");
+  console.log("═══════════════════════════════════════════════════\n");
+
+  interface FullnodeResult {
+    label: string;
+    address: string;
+    hexAddress: string;
+    energyLimit: number;
+    energyUsed: number;
+    netLimit: number;
+    netUsed: number;
+    freeNetLimit: number;
+    freeNetUsed: number;
+    delegatedTo: number;
+    receivedFrom: number;
+  }
+
+  const fullnodeResults: FullnodeResult[] = [];
+
+  for (const { label, address } of KNOWN_ADDRESSES) {
+    const hexAddr = base58ToHex(address);
+    console.log(`\n── ${label} ──`);
+    console.log(`   Base58: ${address}`);
+    console.log(`   Hex:    ${hexAddr}`);
+
+    let energyLimit = 0, energyUsed = 0, netLimit = 0, netUsed = 0, freeNetLimit = 0, freeNetUsed = 0;
+    let delegatedTo = 0, receivedFrom = 0;
+
+    // getaccountresource with hex
     try {
       const resource = await trongrid.post<{
         EnergyLimit?: number;
@@ -327,36 +160,151 @@ async function main() {
         NetUsed?: number;
         freeNetLimit?: number;
         freeNetUsed?: number;
-      }>("/wallet/getaccountresource", { address });
+        TotalEnergyLimit?: number;
+        TotalEnergyWeight?: number;
+        Error?: string;
+      }>("/wallet/getaccountresource", { address: hexAddr });
 
+      if (resource.Error) {
+        console.log(`   getaccountresource: [ERROR] ${resource.Error.slice(0, 150)}`);
+      } else {
+        energyLimit = resource.EnergyLimit ?? 0;
+        energyUsed = resource.EnergyUsed ?? 0;
+        netLimit = resource.NetLimit ?? 0;
+        netUsed = resource.NetUsed ?? 0;
+        freeNetLimit = resource.freeNetLimit ?? 0;
+        freeNetUsed = resource.freeNetUsed ?? 0;
+        console.log(`   getaccountresource: energyLimit=${fmt(energyLimit)} energyUsed=${fmt(energyUsed)} netLimit=${fmt(netLimit)} freeNetLimit=${fmt(freeNetLimit)}`);
+        if (resource.TotalEnergyLimit) {
+          console.log(`   (global: TotalEnergyLimit=${fmt(resource.TotalEnergyLimit)} TotalEnergyWeight=${fmt(resource.TotalEnergyWeight ?? 0)})`);
+        }
+      }
+    } catch (err) {
+      console.log(`   getaccountresource: [EXCEPTION] ${err instanceof Error ? err.message : err}`);
+    }
+    await sleep(300);
+
+    // getdelegatedresourceaccountindexV2 with hex
+    try {
       const delegation = await trongrid.post<{
+        account?: string;
         toAccounts?: string[];
         fromAccounts?: string[];
-      }>("/wallet/getdelegatedresourceaccountindexV2", { value: address });
+        Error?: string;
+      }>("/wallet/getdelegatedresourceaccountindexV2", { value: hexAddr });
 
-      energyResults.push({
-        label,
-        address,
-        energyLimit: resource.EnergyLimit ?? 0,
-        energyUsed: resource.EnergyUsed ?? 0,
-        netLimit: (resource.NetLimit ?? 0) + (resource.freeNetLimit ?? 0),
-        delegatedTo: delegation.toAccounts?.length ?? 0,
-        receivedFrom: delegation.fromAccounts?.length ?? 0,
-      });
-
-      await sleep(500);
+      if (delegation.Error) {
+        console.log(`   delegationIndex: [ERROR] ${delegation.Error.slice(0, 150)}`);
+      } else {
+        delegatedTo = delegation.toAccounts?.length ?? 0;
+        receivedFrom = delegation.fromAccounts?.length ?? 0;
+        console.log(`   delegationIndex: delegatedTo=${delegatedTo} receivedFrom=${receivedFrom}`);
+        if (delegatedTo > 0) {
+          console.log(`   toAccounts: ${JSON.stringify(delegation.toAccounts?.slice(0, 5))}`);
+        }
+        if (receivedFrom > 0) {
+          console.log(`   fromAccounts: ${JSON.stringify(delegation.fromAccounts?.slice(0, 5))}`);
+        }
+      }
     } catch (err) {
-      console.log(`  [ERROR] ${label}: ${err instanceof Error ? err.message : err}`);
+      console.log(`   delegationIndex: [EXCEPTION] ${err instanceof Error ? err.message : err}`);
     }
+    await sleep(300);
+
+    fullnodeResults.push({
+      label, address, hexAddress: hexAddr,
+      energyLimit, energyUsed, netLimit, netUsed, freeNetLimit, freeNetUsed,
+      delegatedTo, receivedFrom,
+    });
   }
 
-  console.log("\n  Dirección                          | Energía Límite | Energía Usada | BW Límite | Delegó a | Recibió de");
-  console.log("  " + "-".repeat(110));
-  for (const r of energyResults) {
-    console.log(`  ${r.label.padEnd(36)} | ${String(r.energyLimit).padStart(14)} | ${String(r.energyUsed).padStart(13)} | ${String(r.netLimit).padStart(9)} | ${String(r.delegatedTo).padStart(8)} | ${String(r.receivedFrom).padStart(10)}`);
+  // ── PART 3: TronScan /api/contracts (top by trxCount = proxy for energy use) ──
+  console.log("\n\n═══════════════════════════════════════════════════");
+  console.log("PARTE 3: TronScan — Top contratos por actividad");
+  console.log("(sort=-trxCount = proxy para consumo de energía)");
+  console.log("═══════════════════════════════════════════════════\n");
+
+  try {
+    const contracts = await tronscan.get<{
+      data?: {
+        address?: string;
+        name?: string;
+        balance?: number;
+        trxCount?: number;
+        tag1?: string;
+        date_created?: number;
+        verify_status?: number;
+      }[];
+      total?: number;
+      contractCount?: number;
+      totalTrigger?: number;
+    }>("/api/contracts", { sort: "-trxCount", limit: "20", start: "0" });
+
+    console.log(`  Total contratos: ${fmt(contracts.contractCount ?? 0)}`);
+    console.log(`  Total triggers: ${fmt(contracts.totalTrigger ?? 0)}`);
+    console.log(`  Top 20 por trxCount:\n`);
+
+    const topContracts = contracts.data ?? [];
+    for (let i = 0; i < topContracts.length; i++) {
+      const c = topContracts[i]!;
+      console.log(`  ${String(i + 1).padStart(2)}. ${(c.name || "Sin nombre").padEnd(30)} | txs: ${fmt(c.trxCount ?? 0).padStart(8)} | balance: ${fmt(c.balance ?? 0).padStart(10)} | ${c.tag1 || ""}`);
+      console.log(`      ${c.address}`);
+    }
+
+    // Now query energy data for top 10 contracts via TronGrid with hex
+    console.log("\n  Consultando energía de top 10 contratos via TronGrid (hex)...\n");
+
+    for (let i = 0; i < Math.min(10, topContracts.length); i++) {
+      const c = topContracts[i]!;
+      if (!c.address) continue;
+      const hexAddr = base58ToHex(c.address);
+      try {
+        const resource = await trongrid.post<{
+          EnergyLimit?: number;
+          EnergyUsed?: number;
+          NetLimit?: number;
+          NetUsed?: number;
+          freeNetLimit?: number;
+          freeNetUsed?: number;
+          Error?: string;
+        }>("/wallet/getaccountresource", { address: hexAddr });
+
+        if (resource.Error) {
+          console.log(`  ${String(i + 1).padStart(2)}. ${(c.name || c.address!).padEnd(30)} → ERROR: ${resource.Error.slice(0, 80)}`);
+        } else {
+          const eLimit = resource.EnergyLimit ?? 0;
+          const eUsed = resource.EnergyUsed ?? 0;
+          const bwLimit = (resource.NetLimit ?? 0) + (resource.freeNetLimit ?? 0);
+          console.log(`  ${String(i + 1).padStart(2)}. ${(c.name || c.address!).padEnd(30)} → energy: ${fmt(eLimit)}/${fmt(eUsed)} used | bw: ${fmt(bwLimit)}`);
+        }
+      } catch (err) {
+        console.log(`  ${String(i + 1).padStart(2)}. ${(c.name || c.address!).padEnd(30)} → EXCEPTION: ${err instanceof Error ? err.message : err}`);
+      }
+      await sleep(300);
+    }
+  } catch (err) {
+    console.log(`  [ERROR] TronScan contracts: ${err instanceof Error ? err.message : err}`);
   }
 
-  console.log("\n__EXPLORER_V4_DONE__");
+  // ── PART 4: Summary tables ──
+  console.log("\n\n═══════════════════════════════════════════════════");
+  console.log("PARTE 4: Resumen — datos de energía y delegación");
+  console.log("═══════════════════════════════════════════════════\n");
+
+  console.log("  Fullnode API (hex addresses):");
+  console.log("  " + "-".repeat(120));
+  console.log(`  ${"Cuenta".padEnd(30)} | ${"Energía Lím".padStart(12)} | ${"Energía Usada".padStart(13)} | ${"BW Lím".padStart(8)} | ${"Delegó a".padStart(8)} | ${"Recibió de".padStart(10)}`);
+  console.log("  " + "-".repeat(120));
+  for (const r of fullnodeResults) {
+    console.log(`  ${r.label.padEnd(30)} | ${fmt(r.energyLimit).padStart(12)} | ${fmt(r.energyUsed).padStart(13)} | ${fmt(r.netLimit + r.freeNetLimit).padStart(8)} | ${String(r.delegatedTo).padStart(8)} | ${String(r.receivedFrom).padStart(10)}`);
+  }
+
+  const hasAnyEnergy = fullnodeResults.some(r => r.energyLimit > 0 || r.energyUsed > 0);
+  const hasAnyDelegation = fullnodeResults.some(r => r.delegatedTo > 0 || r.receivedFrom > 0);
+  console.log(`\n  ¿Alguna cuenta con energía? ${hasAnyEnergy ? "SÍ ✓" : "NO"}`);
+  console.log(`  ¿Alguna cuenta con delegación? ${hasAnyDelegation ? "SÍ ✓" : "NO"}`);
+
+  console.log("\n__EXPLORER_V5_DONE__");
 }
 
 main().catch((err) => {
