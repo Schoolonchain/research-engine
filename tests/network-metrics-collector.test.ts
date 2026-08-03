@@ -93,6 +93,11 @@ describe("NetworkMetricsCollector", () => {
     expect(metrics.economics.createAccountFee).toBe(100_000);
     expect(metrics.economics.witnessPayPerBlock).toBe(16_000_000);
     expect(metrics.economics.maintenanceIntervalMs).toBe(21_600_000);
+
+    // Chain params weights > 1e12 → treated as SUN, converted to TRX
+    expect(metrics.staking.stakedForEnergyTrx).toBe(30_000_000);
+    expect(metrics.staking.stakedForBandwidthTrx).toBe(15_000_000);
+    expect(metrics.staking.totalStakedTrx).toBe(45_000_000);
   });
 
   it("computes energy yield as totalEnergyLimit / (totalEnergyWeight / 1M)", async () => {
@@ -173,8 +178,16 @@ describe("NetworkMetricsCollector", () => {
     expect(metrics.bandwidth.totalNetWeight).toBe(9_500_000_000);
     expect(metrics.energy.energyYieldPerTrx).toBeGreaterThan(0);
     expect(metrics.bandwidth.bandwidthYieldPerTrx).toBeGreaterThan(0);
-    // 28.3B TRX staked / ~86.6B supply ≈ 32.7%
-    expect(metrics.stakingRatio).toBeCloseTo(0.3268, 3);
+
+    // Staking breakdown from API data (TRX units)
+    expect(metrics.staking.stakedForEnergyTrx).toBe(18_800_000_000);
+    expect(metrics.staking.stakedForBandwidthTrx).toBe(9_500_000_000);
+    expect(metrics.staking.totalStakedTrx).toBe(28_300_000_000);
+    // No TronScan client → falls back to genesis constant (100B)
+    expect(metrics.staking.totalSupplyTrx).toBe(100_000_000_000);
+    expect(metrics.staking.supplySource).toBe("protocol-constant");
+    // 28.3B / 100B = 0.283
+    expect(metrics.stakingRatio).toBeCloseTo(0.283, 3);
   });
 
   it("fetches top holders from TronScan", async () => {
@@ -202,6 +215,42 @@ describe("NetworkMetricsCollector", () => {
     expect(metrics.topHolders[0]!.balance).toBe(50_000_000);
     expect(metrics.topHolders[0]!.totalFrozen).toBe(10_000_000);
     expect(metrics.topHolders[1]!.balance).toBe(30_000_000);
+  });
+
+  it("fetches total supply from TronScan /api/trx/fund", async () => {
+    await startServer((req, res) => {
+      const url = req.url?.split("?")[0];
+      res.writeHead(200, { "Content-Type": "application/json" });
+      if (url === "/wallet/getchainparameters") {
+        res.end(JSON.stringify({
+          chainParameter: [
+            { key: "getTotalEnergyWeight", value: 0 },
+            { key: "getTotalNetWeight", value: 0 },
+          ],
+        }));
+      } else if (url === "/wallet/getaccountresource") {
+        res.end(JSON.stringify({
+          TotalEnergyWeight: 18_800_000_000,
+          TotalNetWeight: 9_500_000_000,
+        }));
+      } else if (url === "/api/trx/fund") {
+        res.end(JSON.stringify({ fund_trx: 86_614_345_000_000_000 }));
+      } else if (url === "/api/account/list") {
+        res.end(JSON.stringify({ data: [] }));
+      } else {
+        res.end("{}");
+      }
+    });
+
+    const gridClient = new TronHttpClient({ endpoint: `http://127.0.0.1:${port}` });
+    const scanClient = new TronHttpClient({ endpoint: `http://127.0.0.1:${port}` });
+    const collector = new NetworkMetricsCollector(gridClient, scanClient);
+    const metrics = await collector.collect();
+
+    expect(metrics.staking.totalSupplyTrx).toBeCloseTo(86_614_345_000, 0);
+    expect(metrics.staking.supplySource).toBe("tronscan");
+    // 28.3B / 86.6B ≈ 0.3268
+    expect(metrics.stakingRatio).toBeCloseTo(0.3268, 3);
   });
 
   it("returns empty holders when TronScan is unavailable", async () => {

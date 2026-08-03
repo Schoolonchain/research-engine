@@ -44,6 +44,10 @@ export function networkMetricsToRecords(
     { category: "NETWORK", metricName: "total_net_weight", value: data.bandwidth.totalNetWeight, unit: "SUN", confidence: "DIRECT" },
     { category: "NETWORK", metricName: "bandwidth_yield_per_trx", value: data.bandwidth.bandwidthYieldPerTrx, unit: "bw/TRX", confidence: "DERIVED" },
     { category: "NETWORK", metricName: "staking_ratio", value: data.stakingRatio, unit: "ratio", confidence: "DERIVED" },
+    { category: "NETWORK", metricName: "staked_for_energy_trx", value: data.staking.stakedForEnergyTrx, unit: "TRX", confidence: "DIRECT" },
+    { category: "NETWORK", metricName: "staked_for_bandwidth_trx", value: data.staking.stakedForBandwidthTrx, unit: "TRX", confidence: "DIRECT" },
+    { category: "NETWORK", metricName: "total_staked_trx", value: data.staking.totalStakedTrx, unit: "TRX", confidence: "DIRECT" },
+    { category: "NETWORK", metricName: "total_supply_trx", value: data.staking.totalSupplyTrx, unit: "TRX", confidence: data.staking.supplySource === "tronscan" ? "DIRECT" : "DERIVED" },
 
     { category: "MONETARY", metricName: "create_account_fee", value: data.economics.createAccountFee, unit: "SUN", confidence: "DIRECT" },
     { category: "MONETARY", metricName: "burn_trx_amount", value: data.economics.burnTrxAmount, unit: "SUN", confidence: "DIRECT" },

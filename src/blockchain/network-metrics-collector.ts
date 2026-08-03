@@ -32,11 +32,20 @@ export interface AccountRanking {
   readonly power: number;
 }
 
+export interface StakingBreakdown {
+  readonly stakedForEnergyTrx: number;
+  readonly stakedForBandwidthTrx: number;
+  readonly totalStakedTrx: number;
+  readonly totalSupplyTrx: number;
+  readonly supplySource: "tronscan" | "protocol-constant";
+}
+
 export interface TronNetworkMetrics {
   readonly energy: EnergyMarketMetrics;
   readonly bandwidth: BandwidthMarketMetrics;
   readonly economics: ChainEconomics;
   readonly topHolders: readonly AccountRanking[];
+  readonly staking: StakingBreakdown;
   readonly stakingRatio: number;
   readonly collectedAt: Date;
   readonly source: string;
@@ -65,6 +74,15 @@ interface TronScanAccountListResponse {
   }[];
   readonly total?: number;
 }
+
+interface TronScanFundResponse {
+  readonly fund_trx?: number;
+  readonly totalSupply?: number;
+  readonly circulatingSupply?: number;
+  readonly total_trx?: number;
+}
+
+const TRON_GENESIS_SUPPLY_TRX = 100_000_000_000;
 
 function paramMap(response: ChainParamsResponse): Map<string, number> {
   const map = new Map<string, number>();
@@ -131,25 +149,38 @@ export class NetworkMetricsCollector {
       proposalExpireTime: pm.get("getProposalExpireTime") ?? 0,
     });
 
-    const topHolders = await this.fetchTopHolders();
+    const [topHolders, supplyResult] = await Promise.all([
+      this.fetchTopHolders(),
+      this.fetchTotalSupply(),
+    ]);
 
-    // totalEnergyWeight + totalNetWeight = total TRX frozen (staked) across the network.
-    // getchainparameters returns these in SUN; getaccountresource returns them in TRX.
-    // The yield formula already handles the SUN case (divides by 1M), so we normalise
-    // to TRX here by checking magnitude: values > 1 trillion are almost certainly SUN.
-    const rawStaked = totalEnergyWeight + totalNetWeight;
-    const totalStakedTrx = rawStaked > 1e12 ? rawStaked / 1_000_000 : rawStaked;
-    // Approximate total TRX supply (~86.6B). Using a constant avoids an extra API call.
-    const APPROX_TOTAL_SUPPLY_TRX = 86_600_000_000;
-    const stakingRatio = totalStakedTrx > 0
-      ? Math.round((totalStakedTrx / APPROX_TOTAL_SUPPLY_TRX) * 10000) / 10000
+    // getaccountresource returns weights in TRX (verified by cross-referencing
+    // individual account frozen balances against their energy share).
+    // Values > 1 trillion indicate SUN (from getchainparameters) — normalise.
+    const toTrx = (v: number) => (v > 1e12 ? v / 1_000_000 : v);
+    const stakedForEnergyTrx = toTrx(totalEnergyWeight);
+    const stakedForBandwidthTrx = toTrx(totalNetWeight);
+    const totalStakedTrx = stakedForEnergyTrx + stakedForBandwidthTrx;
+
+    const totalSupplyTrx = supplyResult.supply;
+    const stakingRatio = totalStakedTrx > 0 && totalSupplyTrx > 0
+      ? Math.round((totalStakedTrx / totalSupplyTrx) * 10000) / 10000
       : 0;
+
+    const staking: StakingBreakdown = Object.freeze({
+      stakedForEnergyTrx,
+      stakedForBandwidthTrx,
+      totalStakedTrx,
+      totalSupplyTrx,
+      supplySource: supplyResult.source,
+    });
 
     return Object.freeze({
       energy,
       bandwidth,
       economics,
       topHolders: Object.freeze(topHolders),
+      staking,
       stakingRatio,
       collectedAt: new Date(),
       source: "trongrid+tronscan",
@@ -192,5 +223,29 @@ export class NetworkMetricsCollector {
     } catch {
       return [];
     }
+  }
+
+  private async fetchTotalSupply(): Promise<{
+    supply: number;
+    source: StakingBreakdown["supplySource"];
+  }> {
+    if (!this.tronscan) {
+      return { supply: TRON_GENESIS_SUPPLY_TRX, source: "protocol-constant" };
+    }
+
+    try {
+      const resp = await this.tronscan.get<TronScanFundResponse>(
+        "/api/trx/fund",
+      );
+      const supply =
+        (resp.fund_trx ?? resp.totalSupply ?? resp.total_trx ?? 0) / 1_000_000;
+      if (supply > 1_000_000_000) {
+        return { supply, source: "tronscan" };
+      }
+    } catch {
+      // TronScan unavailable — fall through to constant
+    }
+
+    return { supply: TRON_GENESIS_SUPPLY_TRX, source: "protocol-constant" };
   }
 }

@@ -35,6 +35,13 @@ function makeNetworkMetrics(): TronNetworkMetrics {
     topHolders: [
       { address: "TWhale1", balance: 1_000_000, totalFrozen: 500_000, power: 500_000 },
     ],
+    staking: {
+      stakedForEnergyTrx: 30_000_000_000,
+      stakedForBandwidthTrx: 15_000_000_000,
+      totalStakedTrx: 45_000_000_000,
+      totalSupplyTrx: 100_000_000_000,
+      supplySource: "protocol-constant" as const,
+    },
     stakingRatio: 0.5,
     collectedAt: new Date(),
     source: "trongrid",

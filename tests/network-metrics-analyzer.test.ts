@@ -28,6 +28,13 @@ function makeMetrics(overrides: Partial<TronNetworkMetrics> = {}): TronNetworkMe
       proposalExpireTime: 259_200_000,
     },
     topHolders: [],
+    staking: {
+      stakedForEnergyTrx: 30_000_000_000,
+      stakedForBandwidthTrx: 15_000_000_000,
+      totalStakedTrx: 45_000_000_000,
+      totalSupplyTrx: 100_000_000_000,
+      supplySource: "protocol-constant" as const,
+    },
     stakingRatio: 0.5,
     collectedAt: new Date(),
     source: "test",
