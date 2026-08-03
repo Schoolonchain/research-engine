@@ -86,6 +86,10 @@ async function main() {
     console.log(`   Energía fee: ${networkData.energy.energyFee} SUN`);
     console.log(`   Energía total: ${(networkData.energy.totalEnergyLimit / 1e9).toFixed(1)}B`);
     console.log(`   Bandwidth total: ${(networkData.bandwidth.totalNetLimit / 1e9).toFixed(1)}B`);
+    console.log(`   Staking V1+V2 energía: ${(networkData.staking.stakedForEnergyTrx / 1e9).toFixed(2)}B TRX`);
+    console.log(`   Staking V1+V2 ancho de banda: ${(networkData.staking.stakedForBandwidthTrx / 1e9).toFixed(2)}B TRX`);
+    console.log(`   Total staked: ${(networkData.staking.totalStakedTrx / 1e9).toFixed(2)}B TRX`);
+    console.log(`   Supply (${networkData.staking.supplySource}): ${(networkData.staking.totalSupplyTrx / 1e9).toFixed(1)}B TRX`);
     console.log(`   Staking ratio: ${(networkData.stakingRatio * 100).toFixed(1)}%`);
     console.log(`   Top holders: ${networkData.topHolders.length}`);
     console.log(`   → ${count} métricas [${elapsed(t1)}]`);
@@ -95,6 +99,7 @@ async function main() {
       energy: networkData.energy,
       bandwidth: networkData.bandwidth,
       economics: networkData.economics,
+      staking: networkData.staking,
       stakingRatio: networkData.stakingRatio,
       topHolders: networkData.topHolders.map(h => ({
         address: h.address,
