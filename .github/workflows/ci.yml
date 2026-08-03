@@ -60,10 +60,18 @@ jobs:
           TRONGRID_API_KEY: ${{ secrets.TRONGRID_API_KEY }}
           TRONSCAN_API_KEY: ${{ secrets.TRONSCAN_API_KEY }}
 
-      - name: TRON API endpoint explorer
+      - name: TRON API endpoint explorer (TronScan)
         if: env.TRONSCAN_API_KEY != ''
         run: npx tsx scripts/explore-tronscan-endpoints.ts
         timeout-minutes: 3
+        env:
+          TRONGRID_API_KEY: ${{ secrets.TRONGRID_API_KEY }}
+          TRONSCAN_API_KEY: ${{ secrets.TRONSCAN_API_KEY }}
+
+      - name: TRON API endpoint explorer (TronGrid + ambas APIs)
+        if: env.TRONGRID_API_KEY != ''
+        run: npx tsx scripts/explore-trongrid-endpoints.ts
+        timeout-minutes: 5
         env:
           TRONGRID_API_KEY: ${{ secrets.TRONGRID_API_KEY }}
           TRONSCAN_API_KEY: ${{ secrets.TRONSCAN_API_KEY }}
