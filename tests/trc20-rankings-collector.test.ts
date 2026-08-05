@@ -97,7 +97,7 @@ describe("Trc20RankingsCollector", () => {
       const url = new URL(req.url!, `http://127.0.0.1:${port}`);
       const path = url.pathname;
 
-      if (path === "/api/tokens/overview") {
+      if (path === "/api/token/all") {
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify(tokenListResponse()));
       } else if (path === "/api/tokenholders") {
@@ -145,7 +145,7 @@ describe("Trc20RankingsCollector", () => {
   it("handles missing holder data gracefully", async () => {
     const port = await startServer((req, res) => {
       const url = new URL(req.url!, `http://127.0.0.1:${port}`);
-      if (url.pathname === "/api/tokens/overview") {
+      if (url.pathname === "/api/token/all") {
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify(tokenListResponse()));
       } else if (url.pathname === "/api/tokenholders") {
@@ -169,7 +169,7 @@ describe("Trc20RankingsCollector", () => {
   it("parses totalSupply with decimals correctly", async () => {
     const port = await startServer((req, res) => {
       const url = new URL(req.url!, `http://127.0.0.1:${port}`);
-      if (url.pathname === "/api/tokens/overview") {
+      if (url.pathname === "/api/token/all") {
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify({
           tokens: [{
@@ -200,7 +200,7 @@ describe("Trc20RankingsCollector", () => {
   it("respects analyzeTopN limit", async () => {
     const port = await startServer((req, res) => {
       const url = new URL(req.url!, `http://127.0.0.1:${port}`);
-      if (url.pathname === "/api/tokens/overview") {
+      if (url.pathname === "/api/token/all") {
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify(tokenListResponse()));
       } else {
