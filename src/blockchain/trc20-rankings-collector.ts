@@ -56,12 +56,20 @@ interface TronScanTokenListResponse {
   readonly total?: number;
 }
 
+interface TronScanHolderEntry {
+  readonly holder_address?: string;
+  readonly address?: string;
+  readonly balance?: string;
+  readonly balance_num?: number;
+  readonly balanceNum?: number;
+  readonly balanceStr?: string;
+}
+
 interface TronScanTokenHoldersResponse {
-  readonly data?: readonly {
-    readonly holder_address?: string;
-    readonly balance?: string;
-    readonly balance_num?: number;
-  }[];
+  /** /api/token_trc20/holders wraps holders in `trc20_tokens` */
+  readonly trc20_tokens?: readonly TronScanHolderEntry[];
+  /** Some API versions use `data` */
+  readonly data?: readonly TronScanHolderEntry[];
   readonly total?: number;
 }
 
@@ -167,15 +175,12 @@ export class Trc20RankingsCollector {
   private async fetchTokenHolders(
     contractAddress: string,
   ): Promise<readonly Trc20HolderEntry[]> {
-    // Try multiple TronScan API paths and hosts — the available endpoint varies.
+    // The TronScan v2 API wraps holders in `trc20_tokens` (not `data`).
+    // `/api/tokenholders` returns 400 on current hosts, so we only try the trc20 path.
     const paths: { path: string; params: Record<string, string> }[] = [
       {
         path: "/api/token_trc20/holders",
         params: { contract_address: contractAddress, start: "0", limit: "20", order: "desc" },
-      },
-      {
-        path: "/api/tokenholders",
-        params: { contract_address: contractAddress, start: "0", limit: "20", sort: "-balance" },
       },
     ];
 
@@ -183,13 +188,14 @@ export class Trc20RankingsCollector {
       for (const { path, params } of paths) {
         try {
           const response = await client.get<TronScanTokenHoldersResponse>(path, params);
-          const holders = (response.data ?? [])
-            .filter((h) => h.holder_address)
+          const entries = response.trc20_tokens ?? response.data ?? [];
+          const holders = entries
+            .filter((h) => (h.holder_address ?? h.address))
             .map((h) =>
               Object.freeze({
-                address: h.holder_address!,
-                balance: h.balance ?? "0",
-                balanceNum: h.balance_num ?? 0,
+                address: (h.holder_address ?? h.address)!,
+                balance: h.balance ?? h.balanceStr ?? "0",
+                balanceNum: h.balance_num ?? h.balanceNum ?? 0,
               }),
             );
           if (holders.length > 0) return holders;

@@ -46,28 +46,29 @@ function tokenListResponse() {
 }
 
 function tokenHoldersResponse(contract: string) {
+  // TronScan v2 API wraps holders in `trc20_tokens`, not `data`.
   const holders: Record<string, object> = {
     TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t: {
-      data: [
+      trc20_tokens: [
         { holder_address: "THolderA1", balance: "8000000000000", balance_num: 8_000_000 },
         { holder_address: "THolderA2", balance: "3000000000000", balance_num: 3_000_000 },
         { holder_address: "THolderA3", balance: "2000000000000", balance_num: 2_000_000 },
       ],
     },
     TEkxiTehnzSmSe2XqrBj4w32RUN966rdz8: {
-      data: [
+      trc20_tokens: [
         { holder_address: "THolderB1", balance: "100000000000", balance_num: 100_000 },
         { holder_address: "THolderB2", balance: "50000000000", balance_num: 50_000 },
       ],
     },
     TSmallToken111111111111111111111111: {
-      data: [
+      trc20_tokens: [
         { holder_address: "THolderC1", balance: "900000000000000000000000", balance_num: 900_000 },
         { holder_address: "THolderC2", balance: "50000000000000000000000", balance_num: 50_000 },
       ],
     },
   };
-  return holders[contract] ?? { data: [] };
+  return holders[contract] ?? { trc20_tokens: [] };
 }
 
 let server: Server;
@@ -100,7 +101,7 @@ describe("Trc20RankingsCollector", () => {
       if (path === "/api/token/all") {
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify(tokenListResponse()));
-      } else if (path === "/api/tokenholders") {
+      } else if (path === "/api/token_trc20/holders") {
         const contract = url.searchParams.get("contract_address") ?? "";
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify(tokenHoldersResponse(contract)));
@@ -155,7 +156,7 @@ describe("Trc20RankingsCollector", () => {
       if (url.pathname === "/api/token/all") {
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify(tokenListResponse()));
-      } else if (url.pathname === "/api/tokenholders") {
+      } else if (url.pathname === "/api/token_trc20/holders") {
         res.writeHead(500);
         res.end("error");
       } else {
