@@ -217,6 +217,30 @@ async function main() {
   // ── TRC20 Token Rankings ──
   console.log("5. Recolectando rankings TRC20 (TronScan)...");
   t1 = Date.now();
+
+  // Debug: probe holder endpoints directly to see raw responses
+  const probeContract = "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t"; // USDT
+  for (const [label, client] of [["primary", tronscan], ["alt", tronscanAlt]] as const) {
+    for (const path of ["/api/token_trc20/holders", "/api/tokenholders"]) {
+      try {
+        const resp = await client.get<Record<string, unknown>>(path, {
+          contract_address: probeContract, start: "0", limit: "5", order: "desc",
+        });
+        console.log(`   PROBE ${label} ${path}: keys=${Object.keys(resp)} total=${(resp as any).total ?? "?"}`);
+        const items = (resp as any).data ?? (resp as any).token_holders ?? (resp as any).holders ?? [];
+        if (Array.isArray(items) && items.length > 0) {
+          console.log(`   PROBE sample: ${JSON.stringify(items[0]).slice(0, 200)}`);
+        } else {
+          console.log(`   PROBE empty data. Raw keys in resp: ${JSON.stringify(Object.keys(resp))}`);
+          // Log first 300 chars of JSON to see structure
+          console.log(`   PROBE raw: ${JSON.stringify(resp).slice(0, 300)}`);
+        }
+      } catch (err) {
+        console.log(`   PROBE ${label} ${path}: ERROR ${err instanceof Error ? err.message : err}`);
+      }
+    }
+  }
+
   let trc20Data = null;
   try {
     const trc20Collector = new Trc20RankingsCollector(tronscan, 5, [tronscanAlt]);
