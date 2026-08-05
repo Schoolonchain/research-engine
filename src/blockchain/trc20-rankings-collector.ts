@@ -65,6 +65,22 @@ interface TronScanTokenHoldersResponse {
   readonly total?: number;
 }
 
+/**
+ * Well-known TRC-20 tokens on TRON mainnet.
+ * Used as fallback when the token listing API is unavailable (returns 404 on
+ * some TronScan API hosts). Holder data is still fetched live via /api/tokenholders.
+ */
+const WELL_KNOWN_TOKENS: readonly Trc20TokenSummary[] = Object.freeze([
+  { contractAddress: "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t", name: "Tether USD", symbol: "USDT", decimals: 6, holderCount: 0, transferCount: 0, totalSupply: "0", marketCap: 0, priceUsd: 0 },
+  { contractAddress: "TSSMHYeV2uE9qYH95DqyoCuNCzEL1NvU3S", name: "Sun Token", symbol: "SUN", decimals: 18, holderCount: 0, transferCount: 0, totalSupply: "0", marketCap: 0, priceUsd: 0 },
+  { contractAddress: "TAFjULxiVgT4qWk6UZwjqwZXTSaGaqnVp4", name: "BitTorrent", symbol: "BTT", decimals: 18, holderCount: 0, transferCount: 0, totalSupply: "0", marketCap: 0, priceUsd: 0 },
+  { contractAddress: "TCFLL5dx5ZJdKnWuesXxi1VPwjLVmWZZy9", name: "JUST", symbol: "JST", decimals: 18, holderCount: 0, transferCount: 0, totalSupply: "0", marketCap: 0, priceUsd: 0 },
+  { contractAddress: "TLa2f6VPqDgRE67v1736s7bJ8Ray5wYjU7", name: "WINkLink", symbol: "WIN", decimals: 6, holderCount: 0, transferCount: 0, totalSupply: "0", marketCap: 0, priceUsd: 0 },
+  { contractAddress: "TNUC9Qb1rRpS5CbWLmNMxXBjyFoydXjWFR", name: "Wrapped TRX", symbol: "WTRX", decimals: 6, holderCount: 0, transferCount: 0, totalSupply: "0", marketCap: 0, priceUsd: 0 },
+  { contractAddress: "TMwFHYXLJaRUPeW6421aqXL4ZEzPRFGkGT", name: "USD Coin", symbol: "USDC", decimals: 6, holderCount: 0, transferCount: 0, totalSupply: "0", marketCap: 0, priceUsd: 0 },
+  { contractAddress: "TUpMhErZL2fhh4sVNULAbNKLokS4GjC1F4", name: "TrueUSD", symbol: "TUSD", decimals: 18, holderCount: 0, transferCount: 0, totalSupply: "0", marketCap: 0, priceUsd: 0 },
+]);
+
 export class Trc20RankingsCollector {
   constructor(
     private readonly tronscan: TronHttpClient,
@@ -72,7 +88,14 @@ export class Trc20RankingsCollector {
   ) {}
 
   async collect(): Promise<Trc20RankingsData> {
-    const topTokens = await this.fetchTopTokens();
+    let topTokens = await this.fetchTopTokens();
+
+    // Fallback: if the token listing API returned nothing, use well-known tokens
+    // so we still fetch live holder data for major tokens.
+    if (topTokens.length === 0) {
+      topTokens = WELL_KNOWN_TOKENS;
+    }
+
     const tokenAnalyses = await this.analyzeTokens(
       topTokens.slice(0, this.analyzeTopN),
     );

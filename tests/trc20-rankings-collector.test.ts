@@ -128,7 +128,7 @@ describe("Trc20RankingsCollector", () => {
     expect(data.source).toBe("tronscan");
   });
 
-  it("returns empty when TronScan fails", async () => {
+  it("falls back to well-known tokens when TronScan listing fails", async () => {
     const port = await startServer((_req, res) => {
       res.writeHead(500);
       res.end("error");
@@ -138,8 +138,15 @@ describe("Trc20RankingsCollector", () => {
     const collector = new Trc20RankingsCollector(client);
     const data = await collector.collect();
 
-    expect(data.topTokens).toHaveLength(0);
-    expect(data.tokenAnalyses).toHaveLength(0);
+    // Fallback provides well-known tokens even when the listing API fails
+    expect(data.topTokens.length).toBeGreaterThan(0);
+    expect(data.topTokens[0]!.symbol).toBe("USDT");
+
+    // Holder fetching also fails (500), so analyses exist but with empty holders
+    expect(data.tokenAnalyses.length).toBeGreaterThan(0);
+    for (const analysis of data.tokenAnalyses) {
+      expect(analysis.topHolders).toHaveLength(0);
+    }
   });
 
   it("handles missing holder data gracefully", async () => {
