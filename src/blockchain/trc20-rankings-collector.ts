@@ -82,10 +82,15 @@ const WELL_KNOWN_TOKENS: readonly Trc20TokenSummary[] = Object.freeze([
 ]);
 
 export class Trc20RankingsCollector {
+  private readonly clients: readonly TronHttpClient[];
+
   constructor(
-    private readonly tronscan: TronHttpClient,
+    tronscan: TronHttpClient,
     private readonly analyzeTopN: number = 5,
-  ) {}
+    altClients: readonly TronHttpClient[] = [],
+  ) {
+    this.clients = [tronscan, ...altClients];
+  }
 
   async collect(): Promise<Trc20RankingsData> {
     let topTokens = await this.fetchTopTokens();
@@ -112,7 +117,7 @@ export class Trc20RankingsCollector {
     try {
       // TronScan API v2 uses /api/token/all (not /api/tokens/overview which returns 404).
       // See https://docs.tronscan.org/api-endpoints/tokens
-      const response = await this.tronscan.get<TronScanTokenListResponse>(
+      const response = await this.clients[0]!.get<TronScanTokenListResponse>(
         "/api/token/all",
         { start: "0", limit: "20", filter: "trc20", sort: "holderCount", order: "desc" },
       );
@@ -162,29 +167,38 @@ export class Trc20RankingsCollector {
   private async fetchTokenHolders(
     contractAddress: string,
   ): Promise<readonly Trc20HolderEntry[]> {
-    try {
-      const response = await this.tronscan.get<TronScanTokenHoldersResponse>(
-        "/api/tokenholders",
-        {
-          contract_address: contractAddress,
-          start: "0",
-          limit: "20",
-          sort: "-balance",
-        },
-      );
+    // Try multiple TronScan API paths and hosts — the available endpoint varies.
+    const paths: { path: string; params: Record<string, string> }[] = [
+      {
+        path: "/api/token_trc20/holders",
+        params: { contract_address: contractAddress, start: "0", limit: "20", order: "desc" },
+      },
+      {
+        path: "/api/tokenholders",
+        params: { contract_address: contractAddress, start: "0", limit: "20", sort: "-balance" },
+      },
+    ];
 
-      return (response.data ?? [])
-        .filter((h) => h.holder_address)
-        .map((h) =>
-          Object.freeze({
-            address: h.holder_address!,
-            balance: h.balance ?? "0",
-            balanceNum: h.balance_num ?? 0,
-          }),
-        );
-    } catch {
-      return [];
+    for (const client of this.clients) {
+      for (const { path, params } of paths) {
+        try {
+          const response = await client.get<TronScanTokenHoldersResponse>(path, params);
+          const holders = (response.data ?? [])
+            .filter((h) => h.holder_address)
+            .map((h) =>
+              Object.freeze({
+                address: h.holder_address!,
+                balance: h.balance ?? "0",
+                balanceNum: h.balance_num ?? 0,
+              }),
+            );
+          if (holders.length > 0) return holders;
+        } catch {
+          // Try next path/client
+        }
+      }
     }
+    return [];
   }
 
   private parseSupply(supply: string, decimals: number): number {

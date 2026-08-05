@@ -46,6 +46,13 @@ async function main() {
     rateLimitPerSecond: tronscanKey ? 10 : 3,
   });
 
+  // Secondary TronScan client — some holder endpoints only work on this host.
+  const tronscanAlt = new TronHttpClient({
+    endpoint: "https://apilist.tronscan.io",
+    apiKey: tronscanKey,
+    rateLimitPerSecond: tronscanKey ? 10 : 3,
+  });
+
   console.log("1. Preparando base de datos...");
   const db = new PGlite();
   const executor = makeExecutor(db);
@@ -212,7 +219,7 @@ async function main() {
   t1 = Date.now();
   let trc20Data = null;
   try {
-    const trc20Collector = new Trc20RankingsCollector(tronscan);
+    const trc20Collector = new Trc20RankingsCollector(tronscan, 5, [tronscanAlt]);
     trc20Data = await trc20Collector.collect();
     const count = await orchestrator.ingestTrc20Rankings(trc20Data);
     totalMetrics += count;
@@ -220,6 +227,9 @@ async function main() {
     console.log(`   Análisis detallados: ${trc20Data.tokenAnalyses.length}`);
     if (trc20Data.topTokens[0]) {
       console.log(`   Top token: ${trc20Data.topTokens[0].symbol} (${(trc20Data.topTokens[0].holderCount / 1e6).toFixed(1)}M holders)`);
+    }
+    for (const a of trc20Data.tokenAnalyses) {
+      console.log(`   ${a.token.symbol}: ${a.topHolders.length} holders fetched`);
     }
     console.log(`   → ${count} métricas [${elapsed(t1)}]`);
     await persistToSql("trc20", () => sqlOrchestrator.ingestTrc20Rankings(trc20Data!));
