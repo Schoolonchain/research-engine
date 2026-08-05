@@ -10,6 +10,7 @@ import { OnchainAnalytics } from "../src/blockchain/onchain-analytics.js";
 import { InMemoryMetricStore } from "../src/blockchain/in-memory-metric-store.js";
 import { SqlMetricStore } from "../src/blockchain/sql-metric-store.js";
 import { MetricCollectionOrchestrator } from "../src/blockchain/metric-orchestrator.js";
+import { AddressLabelResolver, type AddressLabel } from "../src/blockchain/address-label-resolver.js";
 import type { DatabaseExecutor } from "../src/db/database.js";
 
 function makeExecutor(db: PGlite): DatabaseExecutor {
@@ -368,6 +369,46 @@ async function main() {
   } catch (err) {
     console.log(`   ERROR: ${err instanceof Error ? err.message : err}\n`);
   }
+
+  // ── Address Label Resolution ──
+  console.log("8. Resolviendo etiquetas de direcciones...");
+  t1 = Date.now();
+  try {
+    const allAddresses = new Set<string>();
+
+    // Collect all unique addresses from TRX holders
+    if (networkData) {
+      for (const h of networkData.topHolders) allAddresses.add(h.address);
+    }
+    // Collect all unique addresses from TRC-20 holders
+    if (trc20Data) {
+      for (const a of trc20Data.tokenAnalyses) {
+        for (const h of a.topHolders) allAddresses.add(h.address);
+      }
+    }
+
+    console.log(`   Direcciones únicas a resolver: ${allAddresses.size}`);
+    const resolver = new AddressLabelResolver([tronscan, tronscanAlt]);
+    const labels = await resolver.resolveAll([...allAddresses]);
+
+    // Attach labels to export
+    const labelMap: Record<string, { name: string; category: string; isContract: boolean }> = {};
+    let resolved = 0;
+    for (const [addr, label] of labels) {
+      labelMap[addr] = { name: label.name, category: label.category, isContract: label.isContract };
+      if (label.category !== "unknown") resolved++;
+    }
+    exportData.addressLabels = labelMap;
+
+    const byCat = { exchange: 0, defi: 0, foundation: 0, token: 0, unknown: 0 };
+    for (const label of labels.values()) byCat[label.category]++;
+    console.log(`   Resueltas: ${resolved}/${allAddresses.size}`);
+    console.log(`   🏦 Exchanges: ${byCat.exchange}  📄 DeFi: ${byCat.defi}  🏛️ Fundación: ${byCat.foundation}  👤 Desconocido: ${byCat.unknown}`);
+    console.log(`   → [${elapsed(t1)}]`);
+  } catch (err) {
+    console.log(`   ERROR: ${err instanceof Error ? err.message : err}\n`);
+  }
+  console.log();
 
   // ── JSON Export ──
   console.log("__AUDIT_JSON_START__");
