@@ -48,7 +48,7 @@ async function main() {
 
   // Secondary TronScan client — some holder endpoints only work on this host.
   const tronscanAlt = new TronHttpClient({
-    endpoint: "https://apilist.tronscan.io",
+    endpoint: "https://apilist.tronscan.org",
     apiKey: tronscanKey,
     rateLimitPerSecond: tronscanKey ? 10 : 3,
   });
