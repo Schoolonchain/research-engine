@@ -106,6 +106,8 @@ async function main() {
         balance: h.balance,
         totalFrozen: h.totalFrozen,
         power: h.power,
+        accountType: h.accountType ?? "unknown",
+        ...(h.name ? { name: h.name } : {}),
       })),
     };
     console.log();
@@ -221,6 +223,36 @@ async function main() {
     }
     console.log(`   → ${count} métricas [${elapsed(t1)}]`);
     await persistToSql("trc20", () => sqlOrchestrator.ingestTrc20Rankings(trc20Data!));
+
+    exportData.trc20 = {
+      topTokens: trc20Data.topTokens.map(t => ({
+        contractAddress: t.contractAddress,
+        name: t.name,
+        symbol: t.symbol,
+        decimals: t.decimals,
+        holderCount: t.holderCount,
+        transferCount: t.transferCount,
+        totalSupply: t.totalSupply,
+        marketCap: t.marketCap,
+        priceUsd: t.priceUsd,
+      })),
+      tokenAnalyses: trc20Data.tokenAnalyses.map(a => ({
+        token: {
+          contractAddress: a.token.contractAddress,
+          name: a.token.name,
+          symbol: a.token.symbol,
+          holderCount: a.token.holderCount,
+          marketCap: a.token.marketCap,
+          priceUsd: a.token.priceUsd,
+        },
+        totalSupplyNum: a.totalSupplyNum,
+        topHolders: a.topHolders.slice(0, 10).map(h => ({
+          address: h.address,
+          balance: h.balance,
+          balanceNum: h.balanceNum,
+        })),
+      })),
+    };
     console.log();
   } catch (err) {
     console.log(`   ERROR: ${err instanceof Error ? err.message : err}\n`);
@@ -301,6 +333,22 @@ async function main() {
     exportData.analytics = {
       deflation: result.deflation,
       healthScore: result.healthScore,
+      tokenVelocities: result.tokenVelocities.map(v => ({
+        symbol: v.symbol,
+        contractAddress: v.contractAddress,
+        holderCount: v.holderCount,
+        transferCount: v.transferCount,
+        velocity: v.velocity,
+        classification: v.classification,
+      })),
+      giniCoefficients: result.giniCoefficients.map(g => ({
+        symbol: g.symbol,
+        contractAddress: g.contractAddress,
+        giniCoefficient: g.giniCoefficient,
+        classification: g.classification,
+        topHolderCount: g.topHolderCount,
+        totalHolderCount: g.totalHolderCount,
+      })),
       findings: findings.map(f => ({ severity: f.severity, title: f.title, description: f.description })),
     };
     console.log();
