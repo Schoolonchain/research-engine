@@ -115,16 +115,23 @@ export function trc20RankingsToRecords(
     blockHeight: null,
   };
 
+  // When the token list came from the hardcoded fallback instead of the live
+  // API, token-level summary metrics (holderCount, marketCap, etc.) are stale
+  // zeros — mark them as FALLBACK so downstream consumers know.
+  // Holder balances are always fetched live regardless of source.
+  const isFallback = data.source === "hardcoded-fallback";
+  const tokenConfidence = isFallback ? "FALLBACK" : "DIRECT";
+
   const entries: EntryInput[] = [];
 
   for (const token of data.topTokens) {
     const addr = token.contractAddress;
     entries.push(
-      { category: "TOKEN", metricName: "token_holder_count", value: token.holderCount, unit: "count", confidence: "DIRECT", address: addr, metadata: { symbol: token.symbol, name: token.name } },
-      { category: "TOKEN", metricName: "token_transfer_count", value: token.transferCount, unit: "count", confidence: "DIRECT", address: addr },
-      { category: "TOKEN", metricName: "token_market_cap", value: token.marketCap, unit: "USD", confidence: "DIRECT", address: addr },
-      { category: "TOKEN", metricName: "token_price_usd", value: token.priceUsd, unit: "USD", confidence: "DIRECT", address: addr },
-      { category: "TOKEN", metricName: "token_total_supply", value: token.totalSupply, unit: "tokens", confidence: "DIRECT", address: addr },
+      { category: "TOKEN", metricName: "token_holder_count", value: token.holderCount, unit: "count", confidence: tokenConfidence, address: addr, metadata: { symbol: token.symbol, name: token.name } },
+      { category: "TOKEN", metricName: "token_transfer_count", value: token.transferCount, unit: "count", confidence: tokenConfidence, address: addr },
+      { category: "TOKEN", metricName: "token_market_cap", value: token.marketCap, unit: "USD", confidence: tokenConfidence, address: addr },
+      { category: "TOKEN", metricName: "token_price_usd", value: token.priceUsd, unit: "USD", confidence: tokenConfidence, address: addr },
+      { category: "TOKEN", metricName: "token_total_supply", value: token.totalSupply, unit: "tokens", confidence: tokenConfidence, address: addr },
     );
   }
 

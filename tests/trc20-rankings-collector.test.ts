@@ -145,6 +145,9 @@ describe("Trc20RankingsCollector", () => {
     expect(data.topTokens.length).toBeGreaterThan(0);
     expect(data.topTokens[0]!.symbol).toBe("USDT");
 
+    // C-02: source must be "hardcoded-fallback" when using static token list
+    expect(data.source).toBe("hardcoded-fallback");
+
     // Holder fetching also fails (500), so analyses exist but with empty holders
     expect(data.tokenAnalyses.length).toBeGreaterThan(0);
     for (const analysis of data.tokenAnalyses) {

@@ -19,7 +19,7 @@ export const METRIC_CATEGORIES = [
 
 export type MetricCategory = (typeof METRIC_CATEGORIES)[number];
 
-export const METRIC_CONFIDENCES = ["DIRECT", "DERIVED", "ESTIMATED"] as const;
+export const METRIC_CONFIDENCES = ["DIRECT", "DERIVED", "ESTIMATED", "FALLBACK"] as const;
 export type MetricConfidence = (typeof METRIC_CONFIDENCES)[number];
 
 export interface MetricRecord {

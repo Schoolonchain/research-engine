@@ -131,11 +131,13 @@ export class Trc20RankingsCollector {
 
   async collect(): Promise<Trc20RankingsData> {
     let topTokens = await this.fetchTopTokens();
+    let usedFallback = false;
 
     // Fallback: if the token listing API returned nothing, use well-known tokens
     // so we still fetch live holder data for major tokens.
     if (topTokens.length === 0) {
       topTokens = WELL_KNOWN_TOKENS;
+      usedFallback = true;
     }
 
     const tokenAnalyses = await this.analyzeTokens(
@@ -146,7 +148,7 @@ export class Trc20RankingsCollector {
       topTokens: Object.freeze(topTokens),
       tokenAnalyses: Object.freeze(tokenAnalyses),
       collectedAt: new Date(),
-      source: "tronscan",
+      source: usedFallback ? "hardcoded-fallback" : "tronscan",
     });
   }
 

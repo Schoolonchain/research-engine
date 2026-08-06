@@ -16,8 +16,8 @@ describe("metric-types", () => {
     expect(METRIC_CATEGORIES).toContain("DEVELOPER");
   });
 
-  it("defines 3 confidence levels", () => {
-    expect(METRIC_CONFIDENCES).toEqual(["DIRECT", "DERIVED", "ESTIMATED"]);
+  it("defines 4 confidence levels", () => {
+    expect(METRIC_CONFIDENCES).toEqual(["DIRECT", "DERIVED", "ESTIMATED", "FALLBACK"]);
   });
 
   it("createMetricRecord generates unique IDs", () => {
