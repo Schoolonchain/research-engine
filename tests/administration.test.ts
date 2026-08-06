@@ -170,8 +170,8 @@ describe("Phase 7 administrative security", () => {
       createHash("sha256").update(issued.accessToken).digest("hex"),
     );
     expect(stored.rows[0]!.csrf_hash).not.toBe(issued.csrfToken);
-    await sessions.revoke(issued.context, "revoke-session-1");
-    await sessions.revoke(issued.context, "revoke-session-1");
+    await Promise.all(Array.from({ length: 8 }, () =>
+      sessions.revoke(issued.context, "revoke-session-1")));
     await expect(
       sessions.authenticate(issued.accessToken),
     ).rejects.toBeInstanceOf(AdministrativeAuthenticationError);
@@ -181,6 +181,10 @@ describe("Phase 7 administrative security", () => {
     expect(actions.rows.map((row) => row.action).sort()).toEqual([
       "administrative_session_issued", "administrative_session_revoked",
     ]);
+    expect((await raw.query<{ count: number }>(
+      `SELECT count(*)::int AS count FROM administrative_mutation_receipts
+       WHERE operation = 'revoke_session'`,
+    )).rows[0]!.count).toBe(1);
   });
 
   it("revalidates revoked, suspended, role-changed and MFA-lost authority", async () => {
@@ -343,19 +347,40 @@ describe("Phase 7 administrative security", () => {
     expect(queue.items[0]).toMatchObject({ knowledgeRevision: 2 });
   });
 
-  it("invalidates eligibility on policy activation and binds reacquisition to the new policy", async () => {
+  it("rejects the old policy snapshot without mass-mutating proposals", async () => {
     const policyAdmin = await context("POLICY_ADMIN", "rotation-policy-admin");
     const validator = await context("VALIDATOR", "rotation-validator");
     const entity = await createEligible(policyAdmin.context, "policy-freshness");
     const administration = new AdministrationService(database);
     const before = await administration.listEligible(validator.context);
     expect(before.items).toHaveLength(1);
+    const beforeState = await raw.query<{ version: number }>(
+      "SELECT version FROM proposals WHERE public_id = $1", [entity.proposalPublicId],
+    );
 
     await new ScorePolicyManager(database).activate(policyAdmin.context, {
       version: 2, priorityThreshold: 0.55, progressThreshold: 0.3,
       confidenceThreshold: 0.4, minimumSupports: 3,
     }, "activate-policy-freshness-2");
     expect((await administration.listEligible(validator.context)).items).toHaveLength(0);
+    const stale = await raw.query<{
+      status: string; score_run_id: string; policy_set_hash: string; version: number;
+    }>(
+      `SELECT status, eligibility_score_run_id AS score_run_id,
+        eligibility_policy_set_hash AS policy_set_hash, version
+       FROM proposals WHERE public_id = $1`, [entity.proposalPublicId],
+    );
+    expect(stale.rows[0]).toMatchObject({
+      status: "ELIGIBLE",
+      score_run_id: before.items[0]!.scoreRunId,
+      policy_set_hash: before.items[0]!.policySetHash,
+      version: beforeState.rows[0]!.version,
+    });
+    expect((await raw.query<{ count: number }>(
+      `SELECT count(*)::int AS count FROM domain_events
+       WHERE event_type = 'eligibility_snapshot_invalidated'
+         AND payload->>'cause' = 'score_policy_activated'`,
+    )).rows[0]!.count).toBe(0);
     expect((await new ScoreService(database).recalculate(entity.proposalPublicId)).eligible)
       .toBe(true);
     const after = await administration.listEligible(validator.context);
@@ -426,25 +451,6 @@ describe("Phase 7 administrative security", () => {
     )).rejects.toBeInstanceOf(AdministrativeConflictError);
   });
 
-  it("audits identity changes and invalidates the changed authority", async () => {
-    const policyAdmin = await context("POLICY_ADMIN", "identity-admin");
-    const moderator = await context("MODERATOR", "identity-target");
-    const administration = new AdministrationService(database);
-    await administration.changeIdentity(
-      policyAdmin.context, moderator.context.identityId, { role: "VALIDATOR" },
-      "Separation of duties update", "identity-change-1",
-    );
-    await administration.changeIdentity(
-      policyAdmin.context, moderator.context.identityId, { role: "VALIDATOR" },
-      "Separation of duties update", "identity-change-1",
-    );
-    const audit = await raw.query<{ reason: string; count: number }>(
-      `SELECT min(reason) AS reason, count(*)::int AS count
-       FROM administrative_action_audit WHERE action = 'administrative_identity_changed'`,
-    );
-    expect(audit.rows[0]).toEqual({ reason: "Separation of duties update", count: 1 });
-  });
-
   it("caps active sessions and purges expired retained sessions", async () => {
     const identityId = await identity("MODERATOR", "bounded-sessions");
     await raw.query(
@@ -470,6 +476,21 @@ describe("Phase 7 administrative security", () => {
       FROM administrative_sessions`, ["c".repeat(64)],
     );
     expect(counts.rows[0]).toEqual({ active: 10, expired: 0 });
+  });
+
+  it("enforces the ten-session cap under concurrent issuance", async () => {
+    await identity("MODERATOR", "concurrent-sessions");
+    const sessions = new AdministrativeSessionService(database);
+    await Promise.all(Array.from({ length: 16 }, () => sessions.issue({
+      issuer: "https://idp.example", subject: "concurrent-sessions",
+      authenticationMethods: ["mfa"], authenticatedAt: new Date(),
+    })));
+    const count = await raw.query<{ active: number; total: number }>(
+      `SELECT count(*) FILTER (WHERE revoked_at IS NULL
+          AND expires_at > CURRENT_TIMESTAMP)::int AS active,
+        count(*)::int AS total FROM administrative_sessions`,
+    );
+    expect(count.rows[0]).toEqual({ active: 10, total: 16 });
   });
 
   it("paginates the fresh eligible queue with an opaque cursor", async () => {

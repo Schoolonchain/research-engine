@@ -3,7 +3,6 @@ import { createHash, randomUUID } from "node:crypto";
 import type { DatabaseExecutor, TransactionalDatabase } from "../db/database.js";
 import { EventStore, type AppendEventCommand } from "../events/event-store.js";
 import {
-  AdministrativeAuthorizationError,
   AdministrativeConflictError,
   AdministrativeNotFoundError,
   AdministrativeValidationError,
@@ -11,7 +10,6 @@ import {
 import { assertAdministrativeAuthority } from "./authority.js";
 import type {
   AdministrativeContext,
-  AdministrativeRole,
   EligibleQueuePage,
   ModeratedEntityType,
   ModerationDecision,
@@ -280,64 +278,4 @@ export class AdministrationService {
     });
   }
 
-  public async changeIdentity(
-    context: AdministrativeContext,
-    targetIdentityId: string,
-    change: Readonly<{ role?: AdministrativeRole; status?: "ACTIVE" | "SUSPENDED" | "REVOKED" }>,
-    reason: string,
-    mutationKey: string,
-  ): Promise<void> {
-    const key = idempotencyKey(mutationKey);
-    const normalizedReason = reason.trim().normalize("NFC");
-    if (normalizedReason.length < 1 || normalizedReason.length > 2000 ||
-      (!change.role && !change.status) ||
-      (change.role !== undefined &&
-        !["MODERATOR", "POLICY_ADMIN", "VALIDATOR"].includes(change.role)) ||
-      (change.status !== undefined &&
-        !["ACTIVE", "SUSPENDED", "REVOKED"].includes(change.status))) {
-      throw new AdministrativeValidationError("Invalid identity change");
-    }
-    const hash = requestHash({ targetIdentityId, ...change, reason: normalizedReason });
-    await this.database.transaction(async (tx) => {
-      await assertAdministrativeAuthority(tx, context, ["POLICY_ADMIN"], true);
-      if (context.identityId === targetIdentityId) {
-        throw new AdministrativeAuthorizationError("Self-administration is forbidden");
-      }
-      if (await alreadyApplied(tx, context, "change_identity", key, hash)) return;
-      const target = await tx.query<{ actor_id: string; role: AdministrativeRole; status: string }>(
-        `SELECT actor_id, role, status FROM administrative_identities
-         WHERE id = $1 FOR UPDATE`, [targetIdentityId],
-      );
-      if (!target.rows[0]) throw new AdministrativeNotFoundError("Identity not found");
-      const correlationId = randomUUID();
-      await tx.query(
-        `UPDATE administrative_identities SET role = COALESCE($1, role),
-          status = COALESCE($2, status), updated_at = CURRENT_TIMESTAMP WHERE id = $3`,
-        [change.role ?? null, change.status ?? null, targetIdentityId],
-      );
-      if (change.status && change.status !== "ACTIVE") {
-        await tx.query(
-          `UPDATE administrative_sessions SET revoked_at = COALESCE(revoked_at, CURRENT_TIMESTAMP)
-           WHERE identity_id = $1`, [targetIdentityId],
-        );
-      }
-      await tx.query(
-        `INSERT INTO administrative_action_audit (
-          actor_id, session_id, action, target_type, target_id,
-          correlation_id, details, reason
-        ) VALUES ($1,$2,'administrative_identity_changed','ADMINISTRATIVE_IDENTITY',
-          $3,$4,$5::jsonb,$6)`,
-        [context.actorId, context.sessionId, targetIdentityId, correlationId,
-          JSON.stringify({ roleChanged: change.role !== undefined,
-            statusChanged: change.status !== undefined, reasonProvided: true }),
-          normalizedReason],
-      );
-      await tx.query(
-        `INSERT INTO administrative_mutation_receipts (
-          identity_id, operation, idempotency_key, request_hash, correlation_id
-        ) VALUES ($1,'change_identity',$2,$3,$4)`,
-        [context.identityId, key, hash, correlationId],
-      );
-    });
-  }
 }

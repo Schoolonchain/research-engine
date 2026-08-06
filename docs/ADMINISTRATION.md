@@ -14,8 +14,9 @@ Las sesiones se limitan a diez activas por identidad. Las expiradas o revocadas 
 lotes después de 24 horas; la auditoría conserva el UUID histórico sin una FK que impida la
 purga. Emisión y revocación producen entradas append-only sin guardar tokens.
 
-El proveedor IdP real, sus claves de verificación y el enrolamiento MFA son adaptadores de
-despliegue pendientes; el núcleo no almacena contraseñas ni secretos del proveedor.
+El proveedor IdP real, sus claves de verificación, el enrolamiento MFA, el aprovisionamiento,
+la suspensión y los cambios de rol pertenecen a la frontera IdP. Fase 7 no expone un servicio
+ni un endpoint para modificar identidades y no introduce un rol `IDENTITY_ADMIN`.
 
 ## Separación de funciones
 
@@ -36,17 +37,28 @@ dentro de la misma operación. La auditoría es append-only. Los motivos no se c
 Log: el evento usa `reasonProvided`; el texto se conserva exclusivamente en la tabla de
 auditoría administrativa restringida.
 
-Toda moderación, activación, revocación de sesión y modificación de identidad exige una
+Toda moderación, activación y revocación de sesión exige una
 `Idempotency-Key`. Un recibo append-only liga identidad, operación, clave, hash de solicitud y
 correlación. Repetir la misma solicitud no muta; reutilizar la clave con otro contenido falla.
 
 ## Vigencia de elegibilidad
 
 Una entrada en la cola liga Proposal, `score_run`, `policySetHash` y `knowledge_revision`.
-Solo aparece si el run fue elegible, su política sigue siendo la activación más reciente y la
-revisión de conocimiento coincide. Moderar conocimiento o activar otra política invalida la
-elegibilidad y devuelve la Proposal a `COLLECTING`; solo un recálculo puede adquirirla otra vez.
+Solo aparece si el run fue elegible, su `policySetHash` coincide con la activación global más
+reciente y la revisión de conocimiento coincide. Una activación no recorre ni modifica
+Proposals: todos los consumidores rechazan el snapshot obsoleto mediante el hash global y el
+siguiente recálculo actualiza individualmente cada Proposal. La moderación sí invalida la
+Proposal afectada porque cambia su propia revisión de conocimiento.
 La cola usa cursor opaco y límites de 1–100 elementos.
+
+### Migración de Proposals elegibles previas
+
+Las Proposals que ya estuvieran `ELIGIBLE` al aplicar `0021` conservan estado y versión, pero
+sus referencias de snapshot nacen nulas. Por tanto quedan fail-closed fuera de la cola, sin
+actualización masiva ni eventos sintéticos. Un recálculo individual con la política activa
+rellena `scoreRunId`, `policySetHash` y `knowledgeRevision` y vuelve a hacerlas visibles si
+continúan cumpliendo el umbral. El despliegue puede recorrerlas por lotes acotados después de
+activar la versión deseada; ese backfill usa el servicio normal de scoring y es reanudable.
 
 ## Límites deliberados
 

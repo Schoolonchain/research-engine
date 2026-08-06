@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 
 import type { TransactionalDatabase } from "../db/database.js";
-import { EventStore, type AppendEventCommand } from "../events/event-store.js";
+import { EventStore } from "../events/event-store.js";
 import { randomUUID } from "node:crypto";
 import type { AdministrativeContext } from "../admin/model.js";
 import {
@@ -154,17 +154,6 @@ export class ScorePolicyManager {
         ) VALUES ($1,$2,$3,$4)`,
         [policy.version, previous.rows[0]?.version ?? null, correlationId, policySetHash],
       );
-      const invalidated = await tx.query<{ id: string; version: number }>(
-        "SELECT id, version FROM proposals WHERE status = 'ELIGIBLE' FOR UPDATE",
-      );
-      await tx.query(
-        `UPDATE proposals SET status = 'COLLECTING', version = version + 1,
-          eligibility_score_run_id = NULL,
-          eligibility_policy_set_hash = NULL,
-          eligibility_knowledge_revision = NULL,
-          updated_at = CURRENT_TIMESTAMP
-         WHERE status = 'ELIGIBLE'`,
-      );
       await tx.query(
         `INSERT INTO administrative_action_audit (
           actor_id, session_id, action, target_type, target_id,
@@ -184,7 +173,7 @@ export class ScorePolicyManager {
         ) VALUES ($1,'activate_score_policy',$2,$3,$4)`,
         [authority.identityId, key, activationRequestHash, correlationId],
       );
-      const commands: AppendEventCommand[] = [{
+      await this.events.appendMany(tx, [{
         eventId: randomUUID(),
         eventType: "score_policy_activated",
         eventVersion: 1,
@@ -198,26 +187,7 @@ export class ScorePolicyManager {
           previousPolicyVersion: previous.rows[0]?.version ?? null,
           policySetHash,
         },
-      }];
-      for (const proposal of invalidated.rows) {
-        commands.push({
-          eventId: randomUUID(),
-          eventType: "eligibility_snapshot_invalidated",
-          eventVersion: 1,
-          aggregateType: "proposal",
-          aggregateId: proposal.id,
-          expectedSequence: proposal.version,
-          actor: { type: "policy_admin", id: authority.actorId },
-          correlationId,
-          payload: {
-            cause: "score_policy_activated",
-            policyVersion: policy.version,
-            policySetHash,
-            executionStarted: false,
-          },
-        });
-      }
-      await this.events.appendMany(tx, commands);
+      }]);
     });
   }
 }

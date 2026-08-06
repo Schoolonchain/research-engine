@@ -13,6 +13,10 @@ ALTER TABLE proposals
       AND eligibility_knowledge_revision IS NOT NULL)
   );
 
+-- Existing ELIGIBLE rows deliberately retain their state but receive NULL snapshot
+-- references. Consumers therefore exclude them fail-closed until bounded, resumable
+-- per-Proposal rescoring populates the snapshot under the active global policy hash.
+
 ALTER TABLE score_runs
   ADD COLUMN policy_set_hash char(64),
   ADD COLUMN knowledge_revision bigint CHECK (knowledge_revision >= 0);

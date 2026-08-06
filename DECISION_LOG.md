@@ -529,8 +529,9 @@ propuesta no se considera aprobada hasta recibir confirmación humana.
 
 - Fecha: 2026-08-06
 - Estado: CORRECCIÓN DE AUDITORÍA; PENDIENTE DE APROBACIÓN HUMANA DE FASE 7
-- Decisión: ligar la cola a scoreRunId, policySetHash y knowledgeRevision; moderación y
-  activación invalidan el snapshot y solo el recálculo readquiere elegibilidad.
+- Decisión: ligar la cola a scoreRunId, policySetHash y knowledgeRevision; una activación
+  invalida lógicamente por hash global sin actualizar Proposals masivamente y el siguiente
+  recálculo renueva el snapshot individual.
 - Motivo: impedir revisión humana basada en conocimiento o políticas obsoletos.
 
 ## D-073 — Motivo restringido y semántica reasonProvided
@@ -545,8 +546,8 @@ propuesta no se considera aprobada hasta recibir confirmación humana.
 
 - Fecha: 2026-08-06
 - Estado: CORRECCIÓN DE AUDITORÍA; PENDIENTE DE APROBACIÓN HUMANA DE FASE 7
-- Decisión: exigir claves idempotentes y recibos append-only para moderación, activación,
-  revocación de sesiones y cambios de identidad.
+- Decisión: exigir claves idempotentes y recibos append-only para moderación, activación y
+  revocación de sesiones; serializar revocaciones concurrentes antes de leer el recibo.
 - Motivo: reintentos no deben duplicar transiciones, auditoría ni eventos.
 
 ## D-075 — Activación global serializada
@@ -555,6 +556,22 @@ propuesta no se considera aprobada hasta recibir confirmación humana.
 - Estado: CORRECCIÓN DE AUDITORÍA; PENDIENTE DE APROBACIÓN HUMANA DE FASE 7
 - Decisión: serializar activaciones mediante un lock persistente y numerarlas secuencialmente.
 - Motivo: previous_policy_version debe formar una cadena total incluso con administradores concurrentes.
+
+## D-076 — Identidad administrada exclusivamente en la frontera IdP
+
+- Fecha: 2026-08-06
+- Estado: CORRECCIÓN DE AUDITORÍA; PENDIENTE DE APROBACIÓN HUMANA DE FASE 7
+- Decisión: retirar `changeIdentity()` y su endpoint; Fase 7 solo consume identidades
+  preaprovisionadas y cambios de estado o rol realizados por la frontera IdP.
+- Motivo: `POLICY_ADMIN` no debe adquirir implícitamente autoridad sobre identidades. Un
+  futuro control interno exigiría aprobación y el diseño separado de `IDENTITY_ADMIN`.
+
+## D-077 — Límite de sesiones serializado por identidad
+
+- Fecha: 2026-08-06
+- Estado: CORRECCIÓN DE AUDITORÍA; PENDIENTE DE APROBACIÓN HUMANA DE FASE 7
+- Decisión: bloquear la fila de identidad antes de contar, revocar exceso e insertar sesión.
+- Motivo: el máximo de diez sesiones activas debe mantenerse también con emisiones concurrentes.
 
 ## D-059 — Datos blockchain en tablas propias, no en sources
 

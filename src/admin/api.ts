@@ -162,27 +162,5 @@ export function buildAdministrationApi(
     return reply.status(204).send();
   });
 
-  app.patch("/admin/identities/:identityId", async (request, reply) => {
-    const context = await dependencies.sessions.authenticate(
-      bearer(request),
-      request.headers["x-csrf-token"] as string | undefined,
-      true,
-    );
-    const params = request.params as { identityId?: unknown };
-    const input = body(request);
-    const change = {
-      ...(input["role"] === undefined ? {} : { role: input["role"] as "MODERATOR" | "POLICY_ADMIN" | "VALIDATOR" }),
-      ...(input["status"] === undefined ? {} : { status: input["status"] as "ACTIVE" | "SUSPENDED" | "REVOKED" }),
-    };
-    await dependencies.administration.changeIdentity(
-      context,
-      string(params.identityId, "identityId"),
-      change,
-      string(input["reason"], "reason"),
-      mutationKey(request),
-    );
-    return reply.status(204).send();
-  });
-
   return app;
 }

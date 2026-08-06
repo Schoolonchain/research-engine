@@ -97,7 +97,8 @@ export class AdministrativeSessionService {
       );
       const identity = await tx.query<IdentityRow>(
         `SELECT id, actor_id, role FROM administrative_identities
-         WHERE issuer = $1 AND subject = $2 AND status = 'ACTIVE'`,
+         WHERE issuer = $1 AND subject = $2 AND status = 'ACTIVE'
+         FOR UPDATE`,
         [issuer, subject],
       );
       const row = identity.rows[0];
@@ -195,6 +196,14 @@ export class AdministrativeSessionService {
     }
     await this.database.transaction(async (tx) => {
       const requestHash = hash(JSON.stringify({ sessionId: context.sessionId }));
+      const session = await tx.query<{ actor_id: string }>(
+        `SELECT identity.actor_id FROM administrative_sessions AS session
+         JOIN administrative_identities AS identity ON identity.id = session.identity_id
+         WHERE session.id = $1 AND identity.id = $2 AND identity.actor_id = $3
+         FOR UPDATE OF session, identity`,
+        [context.sessionId, context.identityId, context.actorId],
+      );
+      if (!session.rows[0]) throw new AdministrativeAuthenticationError("Session not found");
       const existing = await tx.query<{ request_hash: string }>(
         `SELECT request_hash FROM administrative_mutation_receipts
          WHERE identity_id = $1 AND operation = 'revoke_session'
@@ -206,14 +215,6 @@ export class AdministrativeSessionService {
         }
         return;
       }
-      const session = await tx.query<{ actor_id: string }>(
-        `SELECT identity.actor_id FROM administrative_sessions AS session
-         JOIN administrative_identities AS identity ON identity.id = session.identity_id
-         WHERE session.id = $1 AND identity.id = $2 AND identity.actor_id = $3
-         FOR UPDATE OF session, identity`,
-        [context.sessionId, context.identityId, context.actorId],
-      );
-      if (!session.rows[0]) throw new AdministrativeAuthenticationError("Session not found");
       const revoked = await tx.query(
         `UPDATE administrative_sessions SET revoked_at = CURRENT_TIMESTAMP
          WHERE id = $1 AND identity_id = $2 AND revoked_at IS NULL`,
