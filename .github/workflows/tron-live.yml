@@ -34,10 +34,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
-    # Only run when at least one API key is available.
-    # On forks or repos without secrets this job is skipped, not failed.
-    if: ${{ secrets.TRONGRID_API_KEY != '' }}
-
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
