@@ -1,6 +1,6 @@
 import type { TronHttpClient } from "./tron-http-client.js";
 
-export type AddressCategory = "exchange" | "defi" | "foundation" | "token" | "unknown";
+export type AddressCategory = "exchange" | "defi" | "foundation" | "token" | "unknown" | "unknown-contract";
 
 export interface AddressLabel {
   readonly address: string;
@@ -18,7 +18,7 @@ const KNOWN_ADDRESSES: ReadonlyMap<string, { name: string; category: AddressCate
   ["TU3kjFuhtEo42tsCBtfYUAZxoqQ4yuSLQ5", { name: "Poloniex", category: "exchange", isContract: false }],
   ["TWd4WrZ9wn84f5x1hZhL4DHvk738ns5jwb", { name: "Binance Hot Wallet", category: "exchange", isContract: false }],
   ["TASUAUKXCqvwYjesEWv22pFjRsCeF4NKot", { name: "Upbit Hot Wallet", category: "exchange", isContract: false }],
-  ["TDqSquXBgUCLYvYC4XZgrprLK589dkhSCf", { name: "Bitfinex", category: "exchange", isContract: false }],
+  ["TDqSquXBgUCLYvYC4XZgrprLK589dkhSCf", { name: "Binance-Hot 7", category: "exchange", isContract: false }],
   ["TMauqkA78pfysSTn8jD1dvEUkjme2gEEdn", { name: "OKX", category: "exchange", isContract: false }],
   ["THHiKCHNQKxrZiRy4rrqy5jitSP3nUvhJY", { name: "Bybit", category: "exchange", isContract: false }],
   ["TLaGjwhvA8XQYSxFAcAXy7Dvuue9eGYitv", { name: "HTX (Huobi)", category: "exchange", isContract: false }],
@@ -99,10 +99,14 @@ export class AddressLabelResolver {
       }
     }
 
-    // Phase 2: fetch unknown from TronScan
-    for (const addr of toFetch) {
-      const label = await this.fetchAccountLabel(addr);
-      result.set(addr, label);
+    // Phase 2: fetch unknown from TronScan in parallel batches (M-03: avoid N+1)
+    const BATCH_SIZE = 5;
+    for (let i = 0; i < toFetch.length; i += BATCH_SIZE) {
+      const batch = toFetch.slice(i, i + BATCH_SIZE);
+      const labels = await Promise.all(batch.map((addr) => this.fetchAccountLabel(addr)));
+      for (let j = 0; j < batch.length; j++) {
+        result.set(batch[j]!, labels[j]!);
+      }
     }
 
     return result;
@@ -127,8 +131,8 @@ export class AddressLabelResolver {
 
         return {
           address,
-          name: isContract ? "Contrato" : "",
-          category: isContract ? "defi" : "unknown",
+          name: isContract ? "Contrato desconocido" : "",
+          category: isContract ? "unknown-contract" : "unknown",
           isContract,
         };
       } catch {
@@ -168,7 +172,8 @@ function classifyByTag(tag: string, isContract: boolean): AddressCategory {
   ];
   if (defiKeywords.some((kw) => lower.includes(kw))) return "defi";
 
-  if (isContract) return "defi";
+  // M-01: Contracts without a recognized DeFi tag should not be assumed to be DeFi.
+  if (isContract) return "unknown-contract";
 
   return "unknown";
 }

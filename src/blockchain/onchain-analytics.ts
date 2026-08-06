@@ -30,7 +30,7 @@ export interface GiniResult {
   readonly symbol: string;
   readonly contractAddress: string;
   readonly giniCoefficient: number;
-  readonly classification: "egalitarian" | "moderate" | "concentrated" | "extreme";
+  readonly classification: "egalitarian" | "moderate" | "concentrated" | "extreme" | "insufficient-data";
   readonly topHolderCount: number;
   readonly totalHolderCount: number;
 }
@@ -164,6 +164,20 @@ export class OnchainAnalytics {
       .filter((a) => a.topHolders.length >= 2 && a.totalSupplyNum > 0)
       .map((analysis) => {
         const gini = this.approximateGini(analysis);
+
+        // M-04: -1 sentinel means all observed balances were 0 (data missing).
+        // Report as "insufficient-data" so consumers don't confuse it with equality.
+        if (gini < 0) {
+          return Object.freeze({
+            symbol: analysis.token.symbol,
+            contractAddress: analysis.token.contractAddress,
+            giniCoefficient: -1,
+            classification: "insufficient-data" as const,
+            topHolderCount: analysis.topHolders.length,
+            totalHolderCount: analysis.token.holderCount,
+          });
+        }
+
         let classification: GiniResult["classification"];
         if (gini < 0.4) classification = "egalitarian";
         else if (gini < 0.6) classification = "moderate";
@@ -186,7 +200,10 @@ export class OnchainAnalytics {
     const totalHolderCount = analysis.token.holderCount;
     if (totalHolderCount < 2 || totalSupplyNum <= 0) return 0;
 
+    // M-04: If every observed holder has balanceNum 0, the Gini is meaningless —
+    // the data is missing, not "perfectly equal".  Return -1 as a sentinel.
     const topSum = topHolders.reduce((s, h) => s + h.balanceNum, 0);
+    if (topHolders.length > 0 && topSum === 0) return -1;
     const remainingSupply = Math.max(0, totalSupplyNum - topSum);
     const remainingHolders = Math.max(1, totalHolderCount - topHolders.length);
     const avgRemaining = remainingSupply / remainingHolders;

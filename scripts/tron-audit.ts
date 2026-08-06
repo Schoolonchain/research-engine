@@ -396,14 +396,16 @@ async function main() {
     let resolved = 0;
     for (const [addr, label] of labels) {
       labelMap[addr] = { name: label.name, category: label.category, isContract: label.isContract };
-      if (label.category !== "unknown") resolved++;
+      if (label.category !== "unknown" && label.category !== "unknown-contract") resolved++;
     }
     exportData.addressLabels = labelMap;
 
-    const byCat = { exchange: 0, defi: 0, foundation: 0, token: 0, unknown: 0 };
-    for (const label of labels.values()) byCat[label.category]++;
+    const byCat: Record<string, number> = {};
+    for (const label of labels.values()) {
+      byCat[label.category] = (byCat[label.category] ?? 0) + 1;
+    }
     console.log(`   Resueltas: ${resolved}/${allAddresses.size}`);
-    console.log(`   🏦 Exchanges: ${byCat.exchange}  📄 DeFi: ${byCat.defi}  🏛️ Fundación: ${byCat.foundation}  👤 Desconocido: ${byCat.unknown}`);
+    console.log(`   🏦 Exchanges: ${byCat["exchange"] ?? 0}  📄 DeFi: ${byCat["defi"] ?? 0}  🏛️ Fundación: ${byCat["foundation"] ?? 0}  📝 Contrato desc.: ${byCat["unknown-contract"] ?? 0}  👤 Desconocido: ${byCat["unknown"] ?? 0}`);
     console.log(`   → [${elapsed(t1)}]`);
   } catch (err) {
     console.log(`   ERROR: ${err instanceof Error ? err.message : err}\n`);
@@ -414,6 +416,40 @@ async function main() {
   console.log("__AUDIT_JSON_START__");
   console.log(JSON.stringify(exportData));
   console.log("__AUDIT_JSON_END__");
+
+  // ── Minimum Coverage Assertions (C-04) ──
+  // CI must fail if critical data is missing, not silently produce empty results.
+  const coverageErrors: string[] = [];
+
+  if (totalMetrics === 0) {
+    coverageErrors.push("FATAL: 0 métricas recolectadas — ningún collector devolvió datos.");
+  }
+  if (!trc20Data || trc20Data.tokenAnalyses.length === 0) {
+    coverageErrors.push("FATAL: Sin análisis TRC-20 — no se recolectó información de tokens.");
+  } else {
+    // At least one token analysis must have holders with non-zero balances
+    const hasNonZeroHolder = trc20Data.tokenAnalyses.some(
+      (a) => a.topHolders.some((h) => h.balanceNum > 0),
+    );
+    if (!hasNonZeroHolder) {
+      coverageErrors.push("FATAL: Todos los balanceNum de holders TRC-20 son 0 — BigInt parsing puede estar roto.");
+    }
+  }
+  if (!networkData) {
+    coverageErrors.push("FATAL: Sin datos de red — NetworkMetricsCollector falló por completo.");
+  }
+
+  if (coverageErrors.length > 0) {
+    console.error("\n╔══════════════════════════════════════════════════╗");
+    console.error("║        COBERTURA MÍNIMA NO ALCANZADA             ║");
+    console.error("╠══════════════════════════════════════════════════╣");
+    for (const err of coverageErrors) {
+      console.error(`║  ${err}`);
+    }
+    console.error("╚══════════════════════════════════════════════════╝");
+    await db.close();
+    process.exit(1);
+  }
 
   // ── Summary ──
   console.log("╔══════════════════════════════════════════════════╗");

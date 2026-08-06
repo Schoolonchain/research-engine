@@ -71,13 +71,21 @@ interface AccountResourceGlobals {
   readonly TotalNetWeight?: number;
 }
 
+interface TronScanAccountListEntry {
+  readonly address?: string;
+  readonly balance?: number;
+  /** Pre-summed frozen V2 total — may be absent on some API hosts */
+  readonly totalFrozenV2?: number;
+  /** Some API versions split frozen into energy + bandwidth instead */
+  readonly frozenForEnergyV2?: number;
+  readonly frozenForBandWidthV2?: number;
+  /** Legacy field on older API versions */
+  readonly frozen_supply?: number;
+  readonly power?: number;
+}
+
 interface TronScanAccountListResponse {
-  readonly data?: readonly {
-    readonly address?: string;
-    readonly balance?: number;
-    readonly totalFrozenV2?: number;
-    readonly power?: number;
-  }[];
+  readonly data?: readonly TronScanAccountListEntry[];
   readonly total?: number;
 }
 
@@ -244,10 +252,16 @@ export class NetworkMetricsCollector {
       const classified = await Promise.all(
         raw.map(async (a) => {
           const info = await this.classifyAccount(a.address!);
+          // H-02: totalFrozenV2 may not exist on all TronScan API hosts.
+          // Fall back to summing frozenForEnergyV2 + frozenForBandWidthV2,
+          // then frozen_supply (legacy), then 0.
+          const frozenRaw =
+            a.totalFrozenV2 ??
+            (((a.frozenForEnergyV2 ?? 0) + (a.frozenForBandWidthV2 ?? 0)) || (a.frozen_supply ?? 0));
           const entry: AccountRanking = {
             address: a.address!,
             balance: (a.balance ?? 0) / 1_000_000,
-            totalFrozen: (a.totalFrozenV2 ?? 0) / 1_000_000,
+            totalFrozen: frozenRaw / 1_000_000,
             power: a.power ?? 0,
             accountType: info.accountType,
             ...(info.name ? { name: info.name } : {}),
