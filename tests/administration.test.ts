@@ -538,7 +538,23 @@ describe("Phase 7 administrative security", () => {
     );
     expect(new Set(seen).size).toBe(3);
     const decoded = JSON.parse(Buffer.from(first.nextCursor!, "base64url").toString("utf8"));
-    expect(decoded).toEqual([firstItem.publicId, firstItem.scoreRunId]);
+    expect(decoded).toEqual([firstItem.publicId, firstItem.scoreRunId, firstItem.policySetHash]);
+  });
+
+  it("rejects a queue cursor after the active policy changes", async () => {
+    const policyAdmin = await context("POLICY_ADMIN", "cursor-policy-rotation");
+    const validator = await context("VALIDATOR", "cursor-validator-rotation");
+    await createEligible(policyAdmin.context, "cursor-policy-one");
+    await createEligible(policyAdmin.context, "cursor-policy-two", false);
+    const administration = new AdministrationService(database);
+    const first = await administration.listEligible(validator.context, 1);
+    expect(first.nextCursor).not.toBeNull();
+    await new ScorePolicyManager(database).activate(policyAdmin.context, {
+      version: 2, priorityThreshold: 0.6, progressThreshold: 0.4,
+      confidenceThreshold: 0.5, minimumSupports: 4,
+    }, "cursor-policy-rotation-2");
+    await expect(administration.listEligible(validator.context, 1, first.nextCursor!))
+      .rejects.toBeInstanceOf(AdministrativeConflictError);
   });
 
   it("uses injected IdP proof and rejects claimed roles and CSRF bypasses", async () => {
