@@ -49,7 +49,14 @@ reciente y la revisión de conocimiento coincide. Una activación no recorre ni 
 Proposals: todos los consumidores rechazan el snapshot obsoleto mediante el hash global y el
 siguiente recálculo actualiza individualmente cada Proposal. La moderación sí invalida la
 Proposal afectada porque cambia su propia revisión de conocimiento.
-La cola usa cursor opaco y límites de 1–100 elementos.
+El guard compartido `current_proposal_eligibility` gobierna tanto la cola administrativa como
+`ProposalService.get/list`. Una Proposal persistida como `ELIGIBLE` cuyo snapshot ya no sea
+vigente se representa públicamente como `COLLECTING`; el estado físico se conserva hasta el
+recálculo individual.
+
+La cola usa cursor opaco y límites de 1–100 elementos. Su orden, comparación de cursor e índice
+parcial comparten exactamente `(proposal.updated_at, proposal.public_id)`. El UUID resuelve
+empates de timestamp y evita depender de `score_runs.created_at`, que no pertenece al índice.
 
 ### Migración de Proposals elegibles previas
 

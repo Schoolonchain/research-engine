@@ -573,6 +573,23 @@ propuesta no se considera aprobada hasta recibir confirmación humana.
 - Decisión: bloquear la fila de identidad antes de contar, revocar exceso e insertar sesión.
 - Motivo: el máximo de diez sesiones activas debe mantenerse también con emisiones concurrentes.
 
+## D-078 — Guard único y representación pública de elegibilidad
+
+- Fecha: 2026-08-06
+- Estado: CORRECCIÓN DE AUDITORÍA; PENDIENTE DE APROBACIÓN HUMANA DE FASE 7
+- Decisión: centralizar la vigencia en la vista `current_proposal_eligibility`; la cola y las
+  lecturas públicas consumen el mismo guard. Un `ELIGIBLE` físico obsoleto se publica como
+  `COLLECTING` hasta el siguiente recálculo individual.
+- Motivo: ningún consumidor debe interpretar como vigente un snapshot rechazado por otro.
+
+## D-079 — Cursor e índice con una misma clave total
+
+- Fecha: 2026-08-06
+- Estado: CORRECCIÓN DE AUDITORÍA; PENDIENTE DE APROBACIÓN HUMANA DE FASE 7
+- Decisión: ordenar, cursorizar e indexar la cola por `(proposal.updated_at, public_id)`.
+- Motivo: el UUID desempata timestamps y la consulta puede usar el índice parcial sin mezclar
+  `score_runs.created_at`, evitando omisiones y duplicados entre páginas.
+
 ## D-059 — Datos blockchain en tablas propias, no en sources
 
 - Fecha: 2026-07-27

@@ -70,8 +70,8 @@ async function alreadyApplied(
   return true;
 }
 
-function encodeCursor(createdAt: Date, publicId: string): string {
-  return Buffer.from(JSON.stringify([createdAt.toISOString(), publicId]), "utf8")
+function encodeCursor(updatedAt: Date, publicId: string): string {
+  return Buffer.from(JSON.stringify([updatedAt.toISOString(), publicId]), "utf8")
     .toString("base64url");
 }
 
@@ -237,27 +237,18 @@ export class AdministrationService {
       );
       const result = await tx.query<{
         public_id: string; title: string; updated_at: Date; score_run_id: string;
-        policy_set_hash: string; knowledge_revision: string; score_created_at: Date;
+        policy_set_hash: string; knowledge_revision: string;
       }>(
-        `WITH active_activation AS (
-           SELECT policy_version, policy_set_hash FROM score_policy_activations
-           ORDER BY activation_sequence DESC LIMIT 1
-         )
-         SELECT proposal.public_id, proposal.title, proposal.updated_at,
-           run.id AS score_run_id, run.policy_set_hash,
-           proposal.knowledge_revision, run.created_at AS score_created_at
+        `SELECT proposal.public_id, proposal.title, proposal.updated_at,
+           current.score_run_id, current.policy_set_hash,
+           current.knowledge_revision
          FROM proposals AS proposal
-         JOIN score_runs AS run ON run.id = proposal.eligibility_score_run_id
-         JOIN active_activation AS activation
-           ON activation.policy_version = run.policy_version
-          AND activation.policy_set_hash = run.policy_set_hash
-         WHERE proposal.status = 'ELIGIBLE' AND run.eligible = true
-           AND run.knowledge_revision = proposal.knowledge_revision
-           AND proposal.eligibility_knowledge_revision = proposal.knowledge_revision
-           AND proposal.eligibility_policy_set_hash = run.policy_set_hash
+         JOIN current_proposal_eligibility AS current
+           ON current.proposal_id = proposal.id
+         WHERE proposal.status = 'ELIGIBLE'
            AND ($1::timestamptz IS NULL OR
-             (run.created_at, proposal.public_id) > ($1::timestamptz, $2::uuid))
-         ORDER BY run.created_at, proposal.public_id LIMIT $3`,
+             (proposal.updated_at, proposal.public_id) > ($1::timestamptz, $2::uuid))
+         ORDER BY proposal.updated_at, proposal.public_id LIMIT $3`,
         [after?.[0] ?? null, after?.[1] ?? null, limit + 1],
       );
       const pageRows = result.rows.slice(0, limit);
@@ -273,7 +264,7 @@ export class AdministrationService {
       return Object.freeze({
         items: Object.freeze(items),
         nextCursor: result.rows.length > limit && last
-          ? encodeCursor(last.score_created_at, last.public_id) : null,
+          ? encodeCursor(last.updated_at, last.public_id) : null,
       });
     });
   }

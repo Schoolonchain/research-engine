@@ -54,3 +54,26 @@ INSERT INTO administrative_locks (name) VALUES ('policy_activation');
 CREATE INDEX proposals_fresh_eligibility_idx
   ON proposals (updated_at, public_id)
   WHERE status = 'ELIGIBLE' AND eligibility_score_run_id IS NOT NULL;
+
+CREATE VIEW current_proposal_eligibility AS
+WITH active_activation AS (
+  SELECT policy_version, policy_set_hash
+  FROM score_policy_activations
+  ORDER BY activation_sequence DESC
+  LIMIT 1
+)
+SELECT proposal.id AS proposal_id,
+  run.id AS score_run_id,
+  run.policy_set_hash,
+  proposal.knowledge_revision,
+  run.created_at AS score_created_at
+FROM proposals AS proposal
+JOIN score_runs AS run ON run.id = proposal.eligibility_score_run_id
+JOIN active_activation AS activation
+  ON activation.policy_version = run.policy_version
+ AND activation.policy_set_hash = run.policy_set_hash
+WHERE proposal.status = 'ELIGIBLE'
+  AND run.eligible = true
+  AND run.knowledge_revision = proposal.knowledge_revision
+  AND proposal.eligibility_knowledge_revision = proposal.knowledge_revision
+  AND proposal.eligibility_policy_set_hash = run.policy_set_hash;

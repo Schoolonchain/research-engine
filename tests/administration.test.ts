@@ -21,6 +21,7 @@ import type {
 import { loadMigrations, migrate } from "../src/db/migrations.js";
 import { ScorePolicyManager } from "../src/scoring/policy-manager.js";
 import { ScoreService } from "../src/scoring/score-service.js";
+import { ProposalService } from "../src/proposals/proposal-service.js";
 
 class Executor implements DatabaseExecutor {
   public constructor(private readonly db: PGlite | Transaction) {}
@@ -352,8 +353,10 @@ describe("Phase 7 administrative security", () => {
     const validator = await context("VALIDATOR", "rotation-validator");
     const entity = await createEligible(policyAdmin.context, "policy-freshness");
     const administration = new AdministrationService(database);
+    const proposals = new ProposalService(database);
     const before = await administration.listEligible(validator.context);
     expect(before.items).toHaveLength(1);
+    expect((await proposals.get(entity.proposalPublicId)).status).toBe("ELIGIBLE");
     const beforeState = await raw.query<{ version: number }>(
       "SELECT version FROM proposals WHERE public_id = $1", [entity.proposalPublicId],
     );
@@ -363,6 +366,10 @@ describe("Phase 7 administrative security", () => {
       confidenceThreshold: 0.4, minimumSupports: 3,
     }, "activate-policy-freshness-2");
     expect((await administration.listEligible(validator.context)).items).toHaveLength(0);
+    expect((await proposals.get(entity.proposalPublicId)).status).toBe("COLLECTING");
+    expect((await proposals.list(undefined, 100, 0)).find(
+      (item) => item.publicId === entity.proposalPublicId,
+    )?.status).toBe("COLLECTING");
     const stale = await raw.query<{
       status: string; score_run_id: string; policy_set_hash: string; version: number;
     }>(
@@ -386,6 +393,7 @@ describe("Phase 7 administrative security", () => {
     const after = await administration.listEligible(validator.context);
     expect(after.items).toHaveLength(1);
     expect(after.items[0]!.policySetHash).not.toBe(before.items[0]!.policySetHash);
+    expect((await proposals.get(entity.proposalPublicId)).status).toBe("ELIGIBLE");
   });
 
   it("serializes concurrent activations into a correct previous-version chain", async () => {
@@ -496,18 +504,32 @@ describe("Phase 7 administrative security", () => {
   it("paginates the fresh eligible queue with an opaque cursor", async () => {
     const policyAdmin = await context("POLICY_ADMIN", "cursor-policy-admin");
     const validator = await context("VALIDATOR", "cursor-validator");
-    await createEligible(policyAdmin.context, "cursor-one");
-    await createEligible(policyAdmin.context, "cursor-two", false);
-    const administration = new AdministrationService(database);
-    const first = await administration.listEligible(validator.context, 1);
-    expect(first.items).toHaveLength(1);
-    expect(first.nextCursor).not.toBeNull();
-    const second = await administration.listEligible(
-      validator.context, 1, first.nextCursor!,
+    const one = await createEligible(policyAdmin.context, "cursor-one");
+    const two = await createEligible(policyAdmin.context, "cursor-two", false);
+    const three = await createEligible(policyAdmin.context, "cursor-three", false);
+    await raw.query(
+      `UPDATE proposals SET updated_at = '2026-01-01T00:00:00Z'
+       WHERE public_id = ANY($1::uuid[])`,
+      [[one.proposalPublicId, two.proposalPublicId]],
     );
-    expect(second.items).toHaveLength(1);
-    expect(second.items[0]!.publicId).not.toBe(first.items[0]!.publicId);
-    expect(second.nextCursor).toBeNull();
+    await raw.query(
+      `UPDATE proposals SET updated_at = '2020-01-01T00:00:00Z'
+       WHERE public_id = $1`, [three.proposalPublicId],
+    );
+    const administration = new AdministrationService(database);
+    const seen: string[] = [];
+    let cursor: string | undefined;
+    do {
+      const page = await administration.listEligible(validator.context, 1, cursor);
+      expect(page.items).toHaveLength(1);
+      seen.push(page.items[0]!.publicId);
+      cursor = page.nextCursor ?? undefined;
+    } while (cursor);
+    expect(seen).toEqual([
+      three.proposalPublicId,
+      ...[one.proposalPublicId, two.proposalPublicId].sort(),
+    ]);
+    expect(new Set(seen).size).toBe(3);
   });
 
   it("uses injected IdP proof and rejects claimed roles and CSRF bypasses", async () => {

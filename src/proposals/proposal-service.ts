@@ -93,6 +93,25 @@ async function selectInternal(
   return row;
 }
 
+async function selectPublic(
+  transaction: DatabaseExecutor,
+  publicId: string,
+): Promise<ProposalRow> {
+  const result = await transaction.query<ProposalRow>(
+    `SELECT stored.*,
+       CASE WHEN stored.status = 'ELIGIBLE' AND current.proposal_id IS NULL
+         THEN 'COLLECTING' ELSE stored.status END AS status
+     FROM proposals AS stored
+     LEFT JOIN current_proposal_eligibility AS current
+       ON current.proposal_id = stored.id
+     WHERE stored.public_id = $1`,
+    [publicId],
+  );
+  const row = result.rows[0];
+  if (!row || row.status === "DELETED") throw new ProposalNotFoundError();
+  return row;
+}
+
 function eventCommand(
   row: ProposalRow,
   actor: ActorContext,
@@ -176,7 +195,7 @@ export class ProposalService {
     actor?: ActorContext,
   ): Promise<Proposal> {
     return this.database.transaction(async (transaction) => {
-      const row = await selectInternal(transaction, publicId);
+      const row = await selectPublic(transaction, publicId);
       if (
         row.visibility === "PRIVATE" &&
         (!actor || !canManage(actor, row))
@@ -205,16 +224,20 @@ export class ProposalService {
       const privileged = actor ? PRIVILEGED_ROLES.has(actor.role) : false;
       const result = await transaction.query<ProposalRow>(
         `
-          SELECT *
-          FROM proposals
+          SELECT stored.*,
+            CASE WHEN stored.status = 'ELIGIBLE' AND current.proposal_id IS NULL
+              THEN 'COLLECTING' ELSE stored.status END AS status
+          FROM proposals AS stored
+          LEFT JOIN current_proposal_eligibility AS current
+            ON current.proposal_id = stored.id
           WHERE
-            status <> 'DELETED'
+            stored.status <> 'DELETED'
             AND (
-              visibility = 'PUBLIC'
-              OR ($1::uuid IS NOT NULL AND author_actor_id = $1::uuid)
+              stored.visibility = 'PUBLIC'
+              OR ($1::uuid IS NOT NULL AND stored.author_actor_id = $1::uuid)
               OR $2::boolean = true
             )
-          ORDER BY created_at DESC, public_id
+          ORDER BY stored.created_at DESC, stored.public_id
           LIMIT $3 OFFSET $4
         `,
         [actor?.actorId ?? null, privileged, limit, offset],

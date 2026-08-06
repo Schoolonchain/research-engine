@@ -49,7 +49,7 @@ describe("initial database migration", () => {
     `);
 
     const tableNames = result.rows.map((row) => row.table_name);
-    expect(tableNames).toHaveLength(39);
+    expect(tableNames).toHaveLength(40);
     expect(tableNames).toEqual(
       expect.arrayContaining([
         "abuse_signals",
@@ -71,6 +71,7 @@ describe("initial database migration", () => {
         "blockchain_transactions",
         "claims",
         "consumer_receipts",
+        "current_proposal_eligibility",
         "data_collection_runs",
         "domain_events",
         "evidence",
@@ -93,6 +94,15 @@ describe("initial database migration", () => {
         "supports",
       ]),
     );
+    expect((await database.query<{ table_name: string }>(
+      `SELECT table_name FROM information_schema.views
+       WHERE table_schema = 'public' AND table_name = 'current_proposal_eligibility'`,
+    )).rows).toEqual([{ table_name: "current_proposal_eligibility" }]);
+    const index = await database.query<{ indexdef: string }>(
+      `SELECT indexdef FROM pg_indexes
+       WHERE schemaname = 'public' AND indexname = 'proposals_fresh_eligibility_idx'`,
+    );
+    expect(index.rows[0]!.indexdef).toContain("(updated_at, public_id)");
   });
 
   it("models sources, claims and evidence as separate related entities", async () => {
