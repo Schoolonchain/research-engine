@@ -70,23 +70,24 @@ async function alreadyApplied(
   return true;
 }
 
-function encodeCursor(publicId: string, scoreRunId: string): string {
-  return Buffer.from(JSON.stringify([publicId, scoreRunId]), "utf8")
+function encodeCursor(publicId: string, scoreRunId: string, policySetHash: string): string {
+  return Buffer.from(JSON.stringify([publicId, scoreRunId, policySetHash]), "utf8")
     .toString("base64url");
 }
 
-function decodeCursor(value: string | undefined): readonly [string, string] | null {
+function decodeCursor(value: string | undefined): readonly [string, string, string] | null {
   if (value === undefined) return null;
   if (value.length < 1 || value.length > 500) {
     throw new AdministrativeValidationError("Invalid cursor");
   }
   try {
     const parsed = JSON.parse(Buffer.from(value, "base64url").toString("utf8"));
-    if (!Array.isArray(parsed) || parsed.length !== 2 ||
-      typeof parsed[0] !== "string" || typeof parsed[1] !== "string") throw new Error();
+    if (!Array.isArray(parsed) || parsed.length !== 3 ||
+      typeof parsed[0] !== "string" || typeof parsed[1] !== "string" ||
+      typeof parsed[2] !== "string") throw new Error();
     if (!/^[0-9a-f-]{36}$/i.test(parsed[0]) ||
-      !/^[0-9a-f-]{36}$/i.test(parsed[1])) throw new Error();
-    return [parsed[0], parsed[1]];
+      !/^[0-9a-f-]{36}$/i.test(parsed[1]) || !/^[0-9a-f]{64}$/.test(parsed[2])) throw new Error();
+    return [parsed[0], parsed[1], parsed[2]];
   } catch {
     throw new AdministrativeValidationError("Invalid cursor");
   }
@@ -239,11 +240,19 @@ export class AdministrationService {
         const cursorSnapshot = await tx.query<{ present: boolean }>(
           `SELECT true AS present FROM score_runs AS run
            JOIN proposals AS proposal ON proposal.id = run.proposal_id
-           WHERE proposal.public_id = $1 AND run.id = $2`,
-          [after[0], after[1]],
+           WHERE proposal.public_id = $1 AND run.id = $2
+             AND run.policy_set_hash = $3`,
+          [after[0], after[1], after[2]],
         );
         if (!cursorSnapshot.rows[0]) {
           throw new AdministrativeValidationError("Invalid cursor snapshot");
+        }
+        const activePolicy = await tx.query<{ policy_set_hash: string }>(
+          `SELECT policy_set_hash FROM score_policy_activations
+           ORDER BY activation_sequence DESC LIMIT 1`,
+        );
+        if (activePolicy.rows[0]?.policy_set_hash !== after[2]) {
+          throw new AdministrativeConflictError("Eligible queue policy changed; restart pagination");
         }
       }
       const result = await tx.query<{
@@ -274,7 +283,7 @@ export class AdministrationService {
       return Object.freeze({
         items: Object.freeze(items),
         nextCursor: result.rows.length > limit && last
-          ? encodeCursor(last.public_id, last.score_run_id) : null,
+          ? encodeCursor(last.public_id, last.score_run_id, last.policy_set_hash) : null,
       });
     });
   }

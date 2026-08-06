@@ -292,11 +292,12 @@ describe("Proposal service and API", () => {
         INSERT INTO authorizations (
           proposal_id, type, status, policy_version, idempotency_key,
           max_cost_minor, currency, max_duration_seconds,
-          max_calls, max_tokens, expires_at
+          max_calls, max_tokens, expires_at, policy_set_hash, admin_justification
         ) VALUES (
           $1, 'ADMIN', 'VALID', 1, $2,
           100, 'EUR', 60, 1, 100,
-          CURRENT_TIMESTAMP + INTERVAL '1 hour'
+          CURRENT_TIMESTAMP + INTERVAL '1 hour', repeat('a', 64),
+          'Deletion protection fixture'
         )
       `,
       [internal.rows[0]?.id, randomUUID()],
