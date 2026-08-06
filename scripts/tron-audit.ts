@@ -11,6 +11,9 @@ import { InMemoryMetricStore } from "../src/blockchain/in-memory-metric-store.js
 import { SqlMetricStore } from "../src/blockchain/sql-metric-store.js";
 import { MetricCollectionOrchestrator } from "../src/blockchain/metric-orchestrator.js";
 import { AddressLabelResolver, type AddressLabel } from "../src/blockchain/address-label-resolver.js";
+import { runWalletAudit } from "../src/blockchain/wallet-audit-runner.js";
+import { InMemorySnapshotStore } from "../src/blockchain/snapshot-store.js";
+import { SqlSnapshotStore } from "../src/blockchain/sql-snapshot-store.js";
 import type { DatabaseExecutor } from "../src/db/database.js";
 
 function makeExecutor(db: PGlite): DatabaseExecutor {
@@ -126,9 +129,10 @@ async function main() {
   // ── Governance ──
   console.log("3. Recolectando gobernanza (TronGrid)...");
   t1 = Date.now();
+  let govData;
   try {
     const govCollector = new TronGovernanceCollector(trongrid);
-    const govData = await govCollector.collect({ scope: "full" });
+    govData = await govCollector.collect({ scope: "full" });
     const count = await orchestrator.ingestGovernance(govData);
     totalMetrics += count;
     console.log(`   Super Representatives: ${govData.witnesses.length} (${govData.electedCount} elegidos)`);
@@ -163,9 +167,10 @@ async function main() {
   // ── Resource Rankings ──
   console.log("4. Recolectando rankings de recursos (TronGrid + TronScan)...");
   t1 = Date.now();
+  let resourceData;
   try {
     const resourceCollector = new ResourceRankingsCollector(trongrid, tronscan);
-    const resourceData = await resourceCollector.collect();
+    resourceData = await resourceCollector.collect();
     const count = await orchestrator.ingestResourceRankings(resourceData);
     totalMetrics += count;
     console.log(`   Top stakers (por poder): ${resourceData.topStakers.length}`);
@@ -407,6 +412,73 @@ async function main() {
     console.log(`   Resueltas: ${resolved}/${allAddresses.size}`);
     console.log(`   🏦 Exchanges: ${byCat["exchange"] ?? 0}  📄 DeFi: ${byCat["defi"] ?? 0}  🏛️ Fundación: ${byCat["foundation"] ?? 0}  📝 Contrato desc.: ${byCat["unknown-contract"] ?? 0}  👤 Desconocido: ${byCat["unknown"] ?? 0}`);
     console.log(`   → [${elapsed(t1)}]`);
+  } catch (err) {
+    console.log(`   ERROR: ${err instanceof Error ? err.message : err}\n`);
+  }
+  console.log();
+
+  // ── Wallet Audit (M-02: persistent snapshot store) ──
+  console.log("9. Ejecutando auditoría de wallets con persistencia...");
+  t1 = Date.now();
+  try {
+    if (networkData && resourceData) {
+      const sqlSnapshots = new SqlSnapshotStore(executor);
+
+      // M-02: Load previous snapshot from persistent SQL storage for
+      // cross-run risk comparison (massive-unstaking, SR-rotation, etc.).
+      const previousSnapshot = await sqlSnapshots.getLatestAsync();
+      const memStore = new InMemorySnapshotStore();
+      if (previousSnapshot) {
+        memStore.save(previousSnapshot);
+      }
+
+      const auditResult = runWalletAudit(
+        {
+          networkMetrics: networkData,
+          governance: govData ?? null,
+          resourceRankings: resourceData,
+        },
+        memStore,
+      );
+
+      // Persist new snapshot to SQL for future runs.
+      const newSnapshot = memStore.getById(auditResult.snapshotId)!;
+      await sqlSnapshots.saveAsync(newSnapshot);
+
+      const prevCount = await sqlSnapshots.countAsync();
+      console.log(`   Wallets monitoreados: ${auditResult.registry.totalCount}`);
+      console.log(`   Rankings Power Index: ${auditResult.powerIndex.rankings.length}`);
+      console.log(`   Pesos: balance=${auditResult.powerIndex.weightConfig.balance}, voting=${auditResult.powerIndex.weightConfig.votingPower}, delegation=${auditResult.powerIndex.weightConfig.delegations}, energy=${auditResult.powerIndex.weightConfig.energy}`);
+      console.log(`   Alertas de riesgo: ${auditResult.alerts.length}`);
+      for (const alert of auditResult.alerts) {
+        console.log(`   [${alert.severity}] ${alert.title}`);
+      }
+      console.log(`   Snapshots persistidos: ${prevCount}`);
+      console.log(`   → Snapshot ${auditResult.snapshotId} [${elapsed(t1)}]`);
+
+      exportData.walletAudit = {
+        snapshotId: auditResult.snapshotId,
+        walletCount: auditResult.registry.totalCount,
+        roleBreakdown: auditResult.registry.roleBreakdown,
+        powerIndex: {
+          rankingsCount: auditResult.powerIndex.rankings.length,
+          weightConfig: auditResult.powerIndex.weightConfig,
+          topWallets: auditResult.powerIndex.rankings.slice(0, 10).map(r => ({
+            address: r.address,
+            powerScore: r.powerScore,
+            rank: r.rank,
+          })),
+        },
+        alerts: auditResult.alerts.map(a => ({
+          severity: a.severity,
+          title: a.title,
+          category: a.category,
+        })),
+        snapshotsPersisted: prevCount,
+      };
+    } else {
+      console.log("   ⚠️ Datos insuficientes: se requieren datos de red y recursos para la auditoría de wallets.");
+    }
   } catch (err) {
     console.log(`   ERROR: ${err instanceof Error ? err.message : err}\n`);
   }

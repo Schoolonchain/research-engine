@@ -5,7 +5,7 @@ import type {
   SnapshotStore,
 } from "./snapshot-store.js";
 import type { WalletRegistryResult, MonitoredWallet, WalletRole } from "./wallet-registry.js";
-import type { PowerIndexResult, WalletPowerScore } from "./power-index.js";
+import type { PowerIndexResult, PowerIndexWeightConfig, WalletPowerScore } from "./power-index.js";
 
 interface SnapshotRow {
   id: string;
@@ -16,6 +16,7 @@ interface SnapshotRow {
     maxDelegations: number;
     maxEnergy: number;
     computedAt: string;
+    weightConfig?: PowerIndexWeightConfig;
   };
   wallet_count: number;
   created_at: string;
@@ -28,8 +29,8 @@ interface WalletScoreRow {
   delegated_to_count: number;
   energy_limit: string;
   power_score: string;
-  roles: string | null;
-  raw_score_data: string | null;
+  roles: string | WalletRole[] | null;
+  raw_score_data: string | Record<string, unknown> | null;
 }
 
 /**
@@ -44,61 +45,76 @@ export class SqlSnapshotStore implements SnapshotStore {
 
   save(snapshot: WalletAuditSnapshot): void {
     // Fire-and-forget async save — the SnapshotStore interface is sync.
-    void this.saveAsync(snapshot);
+    // Issue 1: Log errors instead of silently swallowing them.
+    void this.saveAsync(snapshot).catch((err) =>
+      console.error("Snapshot save failed:", err),
+    );
   }
 
-  private async saveAsync(snapshot: WalletAuditSnapshot): Promise<void> {
+  async saveAsync(snapshot: WalletAuditSnapshot): Promise<void> {
     const powerSummary = {
       maxBalance: snapshot.powerIndex.maxBalance,
       maxVotingPower: snapshot.powerIndex.maxVotingPower,
       maxDelegations: snapshot.powerIndex.maxDelegations,
       maxEnergy: snapshot.powerIndex.maxEnergy,
       computedAt: snapshot.powerIndex.computedAt.toISOString(),
+      ...(snapshot.powerIndex.weightConfig
+        ? { weightConfig: snapshot.powerIndex.weightConfig }
+        : {}),
     };
 
-    await this.db.query(
-      `INSERT INTO wallet_audit_snapshots (id, network_summary, power_index_summary, wallet_count, created_at)
-       VALUES ($1, $2, $3, $4, $5)
-       ON CONFLICT (id) DO NOTHING`,
-      [
-        snapshot.id,
-        JSON.stringify(snapshot.networkSummary),
-        JSON.stringify(powerSummary),
-        snapshot.powerIndex.rankings.length,
-        snapshot.createdAt.toISOString(),
-      ],
-    );
-
-    // Persist wallet scores for diff comparisons
-    for (const score of snapshot.powerIndex.rankings) {
-      const wallet = snapshot.registry.wallets.get(score.address);
+    // Issue 3: Wrap all inserts in a transaction to avoid partial snapshots.
+    await this.db.query("BEGIN");
+    try {
       await this.db.query(
-        `INSERT INTO snapshot_wallet_scores
-           (snapshot_id, address, balance, voting_power, delegated_to_count,
-            energy_limit, power_score, roles, raw_score_data)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-         ON CONFLICT (snapshot_id, address) DO NOTHING`,
+        `INSERT INTO wallet_audit_snapshots (id, network_summary, power_index_summary, wallet_count, created_at)
+         VALUES ($1, $2, $3, $4, $5)
+         ON CONFLICT (id) DO NOTHING`,
         [
           snapshot.id,
-          score.address,
-          wallet?.balance ?? 0,
-          wallet?.votingPower ?? 0,
-          wallet?.delegatedToCount ?? 0,
-          wallet?.energyLimit ?? 0,
-          score.powerScore,
-          wallet ? JSON.stringify(wallet.roles) : null,
-          JSON.stringify({
-            rawBalance: score.rawBalance,
-            rawVotingPower: score.rawVotingPower,
-            rawDelegations: score.rawDelegations,
-            rawEnergy: score.rawEnergy,
-            normalizedBalance: score.normalizedBalance,
-            normalizedVotingPower: score.normalizedVotingPower,
-            normalizedDelegations: score.normalizedDelegations,
-            normalizedEnergy: score.normalizedEnergy,
-          }),
+          JSON.stringify(snapshot.networkSummary),
+          JSON.stringify(powerSummary),
+          snapshot.powerIndex.rankings.length,
+          snapshot.createdAt.toISOString(),
         ],
       );
+
+      // Persist wallet scores for diff comparisons
+      for (const score of snapshot.powerIndex.rankings) {
+        const wallet = snapshot.registry.wallets.get(score.address);
+        await this.db.query(
+          `INSERT INTO snapshot_wallet_scores
+             (snapshot_id, address, balance, voting_power, delegated_to_count,
+              energy_limit, power_score, roles, raw_score_data)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+           ON CONFLICT (snapshot_id, address) DO NOTHING`,
+          [
+            snapshot.id,
+            score.address,
+            wallet?.balance ?? 0,
+            wallet?.votingPower ?? 0,
+            wallet?.delegatedToCount ?? 0,
+            wallet?.energyLimit ?? 0,
+            score.powerScore,
+            wallet ? JSON.stringify(wallet.roles) : null,
+            JSON.stringify({
+              rawBalance: score.rawBalance,
+              rawVotingPower: score.rawVotingPower,
+              rawDelegations: score.rawDelegations,
+              rawEnergy: score.rawEnergy,
+              normalizedBalance: score.normalizedBalance,
+              normalizedVotingPower: score.normalizedVotingPower,
+              normalizedDelegations: score.normalizedDelegations,
+              normalizedEnergy: score.normalizedEnergy,
+            }),
+          ],
+        );
+      }
+
+      await this.db.query("COMMIT");
+    } catch (err) {
+      await this.db.query("ROLLBACK");
+      throw err;
     }
   }
 
@@ -184,8 +200,12 @@ export class SqlSnapshotStore implements SnapshotStore {
 
     for (let i = 0; i < walletScores.length; i++) {
       const ws = walletScores[i]!;
-      const roles: WalletRole[] = ws.roles ? JSON.parse(ws.roles) : [];
-      const rawScores = ws.raw_score_data ? JSON.parse(ws.raw_score_data) : {};
+      const roles: WalletRole[] = ws.roles
+        ? (typeof ws.roles === "string" ? JSON.parse(ws.roles) : ws.roles)
+        : [];
+      const rawScores = ws.raw_score_data
+        ? (typeof ws.raw_score_data === "string" ? JSON.parse(ws.raw_score_data) : ws.raw_score_data)
+        : {};
 
       wallets.set(ws.address, {
         address: ws.address,
@@ -243,6 +263,12 @@ export class SqlSnapshotStore implements SnapshotStore {
         maxVotingPower: pis.maxVotingPower,
         maxDelegations: pis.maxDelegations,
         maxEnergy: pis.maxEnergy,
+        weightConfig: pis.weightConfig ?? Object.freeze({
+          balance: 0.35,
+          votingPower: 0.4,
+          delegations: 0.05,
+          energy: 0.20,
+        }),
         computedAt: new Date(pis.computedAt),
       }),
       networkSummary: Object.freeze(netSummary),

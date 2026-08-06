@@ -62,6 +62,7 @@ function makeSnapshot(opts: {
     maxVotingPower: 0,
     maxDelegations: 0,
     maxEnergy: 0,
+    weightConfig: { balance: 0.35, votingPower: 0.4, delegations: 0.05, energy: 0.2 },
     computedAt: new Date(),
   };
 

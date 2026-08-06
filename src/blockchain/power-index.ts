@@ -14,12 +14,20 @@ export interface WalletPowerScore {
   readonly rank: number;
 }
 
+export interface PowerIndexWeightConfig {
+  readonly balance: number;
+  readonly votingPower: number;
+  readonly delegations: number;
+  readonly energy: number;
+}
+
 export interface PowerIndexResult {
   readonly rankings: readonly WalletPowerScore[];
   readonly maxBalance: number;
   readonly maxVotingPower: number;
   readonly maxDelegations: number;
   readonly maxEnergy: number;
+  readonly weightConfig: PowerIndexWeightConfig;
   readonly computedAt: Date;
 }
 
@@ -54,6 +62,12 @@ export function computePowerIndex(registry: WalletRegistryResult): PowerIndexRes
       maxVotingPower: 0,
       maxDelegations: 0,
       maxEnergy: 0,
+      weightConfig: Object.freeze({
+        balance: WEIGHT_BALANCE,
+        votingPower: WEIGHT_VOTING_POWER,
+        delegations: WEIGHT_DELEGATIONS,
+        energy: WEIGHT_ENERGY,
+      }),
       computedAt: new Date(),
     });
   }
@@ -116,6 +130,12 @@ export function computePowerIndex(registry: WalletRegistryResult): PowerIndexRes
     maxVotingPower,
     maxDelegations,
     maxEnergy,
+    weightConfig: Object.freeze({
+      balance: WEIGHT_BALANCE,
+      votingPower: WEIGHT_VOTING_POWER,
+      delegations: WEIGHT_DELEGATIONS,
+      energy: WEIGHT_ENERGY,
+    }),
     computedAt: new Date(),
   });
 }
