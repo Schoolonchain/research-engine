@@ -60,9 +60,38 @@ interface TronScanHolderEntry {
   readonly holder_address?: string;
   readonly address?: string;
   readonly balance?: string;
-  readonly balance_num?: number;
-  readonly balanceNum?: number;
   readonly balanceStr?: string;
+}
+
+/**
+ * Parse a raw token balance string (in smallest units) into a human-readable
+ * number using BigInt arithmetic to avoid Number.MAX_SAFE_INTEGER overflow.
+ *
+ * Example: parseBigIntBalance("8000000000000", 6) → 8_000_000  (USDT)
+ * Example: parseBigIntBalance("900000000000000000000000", 18) → 900_000  (BTT)
+ *
+ * The real TronScan API only returns the `balance` string — it does NOT
+ * include a pre-computed `balance_num` field, so this function is the sole
+ * source of truth for `Trc20HolderEntry.balanceNum`.
+ */
+function parseBigIntBalance(rawBalance: string, decimals: number): number {
+  try {
+    if (!rawBalance || rawBalance === "0") return 0;
+    // Strip any decimal point the API might include (defensive)
+    const cleaned = rawBalance.includes(".") ? rawBalance.split(".")[0]! : rawBalance;
+    const raw = BigInt(cleaned);
+    if (raw === 0n) return 0;
+    if (decimals <= 0) return Number(raw);
+
+    const divisor = 10n ** BigInt(decimals);
+    const whole = raw / divisor;
+    const remainder = raw % divisor;
+
+    // Combine integer part + fractional remainder as a float
+    return Number(whole) + Number(remainder) / Number(divisor);
+  } catch {
+    return 0;
+  }
 }
 
 interface TronScanTokenHoldersResponse {
@@ -157,7 +186,7 @@ export class Trc20RankingsCollector {
     const analyses: Trc20TokenAnalysis[] = [];
 
     for (const token of tokens) {
-      const topHolders = await this.fetchTokenHolders(token.contractAddress);
+      const topHolders = await this.fetchTokenHolders(token.contractAddress, token.decimals);
       const totalSupplyNum = this.parseSupply(token.totalSupply, token.decimals);
 
       analyses.push(
@@ -174,6 +203,7 @@ export class Trc20RankingsCollector {
 
   private async fetchTokenHolders(
     contractAddress: string,
+    decimals: number,
   ): Promise<readonly Trc20HolderEntry[]> {
     // The TronScan v2 API wraps holders in `trc20_tokens` (not `data`).
     // `/api/tokenholders` returns 400 on current hosts, so we only try the trc20 path.
@@ -191,13 +221,14 @@ export class Trc20RankingsCollector {
           const entries = response.trc20_tokens ?? response.data ?? [];
           const holders = entries
             .filter((h) => (h.holder_address ?? h.address))
-            .map((h) =>
-              Object.freeze({
+            .map((h) => {
+              const balance = h.balance ?? h.balanceStr ?? "0";
+              return Object.freeze({
                 address: (h.holder_address ?? h.address)!,
-                balance: h.balance ?? h.balanceStr ?? "0",
-                balanceNum: h.balance_num ?? h.balanceNum ?? 0,
-              }),
-            );
+                balance,
+                balanceNum: parseBigIntBalance(balance, decimals),
+              });
+            });
           if (holders.length > 0) return holders;
         } catch {
           // Try next path/client
@@ -208,12 +239,8 @@ export class Trc20RankingsCollector {
   }
 
   private parseSupply(supply: string, decimals: number): number {
-    try {
-      const raw = Number(supply);
-      if (!Number.isFinite(raw)) return 0;
-      return raw / Math.pow(10, decimals);
-    } catch {
-      return 0;
-    }
+    // Delegate to BigInt-based parser to handle 18-decimal tokens whose
+    // raw totalSupply exceeds Number.MAX_SAFE_INTEGER.
+    return parseBigIntBalance(supply, decimals);
   }
 }

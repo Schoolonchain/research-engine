@@ -47,24 +47,26 @@ function tokenListResponse() {
 
 function tokenHoldersResponse(contract: string) {
   // TronScan v2 API wraps holders in `trc20_tokens`, not `data`.
+  // The real API does NOT return `balance_num` — only the raw `balance` string
+  // in smallest token units.  balanceNum is computed client-side via BigInt.
   const holders: Record<string, object> = {
     TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t: {
       trc20_tokens: [
-        { holder_address: "THolderA1", balance: "8000000000000", balance_num: 8_000_000 },
-        { holder_address: "THolderA2", balance: "3000000000000", balance_num: 3_000_000 },
-        { holder_address: "THolderA3", balance: "2000000000000", balance_num: 2_000_000 },
+        { holder_address: "THolderA1", balance: "8000000000000" },
+        { holder_address: "THolderA2", balance: "3000000000000" },
+        { holder_address: "THolderA3", balance: "2000000000000" },
       ],
     },
     TEkxiTehnzSmSe2XqrBj4w32RUN966rdz8: {
       trc20_tokens: [
-        { holder_address: "THolderB1", balance: "100000000000", balance_num: 100_000 },
-        { holder_address: "THolderB2", balance: "50000000000", balance_num: 50_000 },
+        { holder_address: "THolderB1", balance: "100000000000" },
+        { holder_address: "THolderB2", balance: "50000000000" },
       ],
     },
     TSmallToken111111111111111111111111: {
       trc20_tokens: [
-        { holder_address: "THolderC1", balance: "900000000000000000000000", balance_num: 900_000 },
-        { holder_address: "THolderC2", balance: "50000000000000000000000", balance_num: 50_000 },
+        { holder_address: "THolderC1", balance: "900000000000000000000000" },
+        { holder_address: "THolderC2", balance: "50000000000000000000000" },
       ],
     },
   };
@@ -203,6 +205,60 @@ describe("Trc20RankingsCollector", () => {
     const data = await collector.collect();
 
     expect(data.tokenAnalyses[0]!.totalSupplyNum).toBe(21_000_000);
+  });
+
+  it("computes balanceNum from balance string via BigInt (no balance_num from API)", async () => {
+    // Regression test for C-01 / H-04 / H-05:
+    // The real TronScan API does NOT return balance_num — only a raw balance string
+    // in smallest token units.  For 18-decimal tokens the raw string exceeds
+    // Number.MAX_SAFE_INTEGER, so BigInt parsing is mandatory.
+    const port = await startServer((req, res) => {
+      const url = new URL(req.url!, `http://127.0.0.1:${port}`);
+      if (url.pathname === "/api/token/all") {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({
+          tokens: [{
+            contractAddress: "TBigToken1111111111111111111111111",
+            name: "BigDecimalToken",
+            abbr: "BDT",
+            decimals: 18,
+            holderCount: 1000,
+            transferCount: 5000,
+            // 30-digit totalSupply — way beyond Number.MAX_SAFE_INTEGER (≈9×10^15)
+            totalSupply: "990000000000000000000000000000",
+            market_cap: 1_000_000,
+            priceInUsd: 0.001,
+          }],
+        }));
+      } else if (url.pathname === "/api/token_trc20/holders") {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        // Holder balance is a 25-digit string — BigInt required
+        res.end(JSON.stringify({
+          trc20_tokens: [
+            { holder_address: "TBigHolder1", balance: "5000000000000000000000000" },
+            { holder_address: "TBigHolder2", balance: "123456789012345678901234" },
+          ],
+        }));
+      } else {
+        res.writeHead(404);
+        res.end();
+      }
+    });
+
+    const client = new TronHttpClient({ endpoint: `http://127.0.0.1:${port}` });
+    const collector = new Trc20RankingsCollector(client, 1);
+    const data = await collector.collect();
+
+    // totalSupply: 990000000000000000000000000000 / 10^18 = 990_000_000_000
+    expect(data.tokenAnalyses[0]!.totalSupplyNum).toBe(990_000_000_000);
+
+    // Holder 1: 5000000000000000000000000 / 10^18 = 5_000_000
+    expect(data.tokenAnalyses[0]!.topHolders[0]!.balanceNum).toBe(5_000_000);
+
+    // Holder 2: 123456789012345678901234 / 10^18 ≈ 123456.789012345678901234
+    const holder2 = data.tokenAnalyses[0]!.topHolders[1]!.balanceNum;
+    expect(holder2).toBeGreaterThan(123456);
+    expect(holder2).toBeLessThan(123457);
   });
 
   it("respects analyzeTopN limit", async () => {
