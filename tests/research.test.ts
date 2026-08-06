@@ -3,7 +3,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { AuthorizationService } from "../src/research/authorization-service.js";
 import { ResearchJobService } from "../src/research/job-service.js";
 import { DeterministicResearchExecutor } from "../src/research/deterministic-executor.js";
-import { ResearchAuthorizationError, ResearchBudgetError } from "../src/research/errors.js";
+import { ResearchAuthorizationError, ResearchBudgetError, ResearchConflictError,
+  ResearchLeaseError, ResearchValidationError } from "../src/research/errors.js";
 import { ScorePolicyManager } from "../src/scoring/policy-manager.js";
 import { loadMigrations, migrate } from "../src/db/migrations.js";
 import type { DatabaseExecutor, DatabaseResult, TransactionalDatabase } from "../src/db/database.js";
@@ -89,6 +90,10 @@ describe("Phase 8 authorization and deterministic research jobs", () => {
     });
   }
 
+  const validOutput = (digest = "a".repeat(64)) => ({
+    kind: "DETERMINISTIC_SIMULATION", digest, provider: null, publication: false,
+  } as const);
+
   it("issues explicitly and creates exactly one job under concurrent consumption", async () => {
     const policyAdmin = await context("POLICY_ADMIN", "policy-concurrency");
     const validator = await context("VALIDATOR", "validator-concurrency");
@@ -159,7 +164,7 @@ describe("Phase 8 authorization and deterministic research jobs", () => {
     const budgetLease = await jobs.claim("budget-worker", 30);
     expect(budgetLease?.publicId).toBe(budgetJob.publicId);
     await expect(jobs.complete(budgetJob.publicId, "budget-worker",
-      { calls: 2, tokens: 1, costMinor: 0 }, {})).rejects.toBeInstanceOf(ResearchBudgetError);
+      { calls: 2, tokens: 1, costMinor: 0 }, validOutput())).rejects.toBeInstanceOf(ResearchBudgetError);
 
     const cancelAuth = await issue(validator, await eligible(policyAdmin, "cancel", false), "cancel");
     const cancelJob = await jobs.createFromAuthorization(cancelAuth.publicId);
@@ -193,5 +198,155 @@ describe("Phase 8 authorization and deterministic research jobs", () => {
     expect((await raw.query<{ status: string; error_code: string }>(
       "SELECT status, error_code FROM research_jobs WHERE public_id = $1", [job.publicId],
     )).rows[0]).toEqual({ status: "FAILED", error_code: "RETRIES_EXHAUSTED" });
+    expect((await raw.query<{ events: number; outbox: number }>(`SELECT
+      count(*)::int AS events,
+      count(outbox.id)::int AS outbox FROM domain_events AS event
+      JOIN outbox_messages AS outbox ON outbox.event_id=event.event_id
+      WHERE event.aggregate_id=(SELECT id FROM research_jobs WHERE public_id=$1)
+        AND event.event_type='research_job_failed'`, [job.publicId])).rows[0]).toEqual({ events: 1, outbox: 1 });
+  });
+
+  it("rejects an expired lease and a late response after reassignment", async () => {
+    const policyAdmin = await context("POLICY_ADMIN", "policy-late-response");
+    const validator = await context("VALIDATOR", "validator-late-response");
+    const jobs = new ResearchJobService(database);
+    const permit = await issue(validator, await eligible(policyAdmin, "late-response"), "late-response");
+    const job = await jobs.createFromAuthorization(permit.publicId);
+    await jobs.claim("old-worker", 30);
+    await raw.query(`UPDATE research_jobs SET lease_expires_at=clock_timestamp()-INTERVAL '1 second'
+      WHERE public_id=$1`, [job.publicId]);
+    await expect(jobs.complete(job.publicId, "old-worker", { calls: 1, tokens: 1, costMinor: 0 },
+      validOutput())).rejects.toBeInstanceOf(ResearchLeaseError);
+    expect((await jobs.claim("new-worker", 30))?.attempts).toBe(2);
+    await expect(jobs.fail(job.publicId, "old-worker", "LATE_RESPONSE", 1,
+      { calls: 1, tokens: 1, costMinor: 0 })).rejects.toBeInstanceOf(ResearchLeaseError);
+    await jobs.complete(job.publicId, "new-worker", { calls: 1, tokens: 1, costMinor: 0 }, validOutput());
+  });
+
+  it("fails at a deadline crossed during execution and accounts consumed work", async () => {
+    const policyAdmin = await context("POLICY_ADMIN", "policy-deadline");
+    const validator = await context("VALIDATOR", "validator-deadline");
+    const jobs = new ResearchJobService(database);
+    const permit = await issue(validator, await eligible(policyAdmin, "deadline"), "deadline");
+    const job = await jobs.createFromAuthorization(permit.publicId);
+    await jobs.claim("deadline-worker", 30);
+    await raw.query(`UPDATE research_jobs SET deadline_at=clock_timestamp()-INTERVAL '1 second'
+      WHERE public_id=$1`, [job.publicId]);
+    await jobs.complete(job.publicId, "deadline-worker", { calls: 1, tokens: 7, costMinor: 0 }, validOutput());
+    const result = await raw.query<{ status: string; calls_used: number; tokens_used: string }>(
+      `SELECT status,calls_used,tokens_used FROM research_jobs WHERE public_id=$1`, [job.publicId]);
+    expect(result.rows[0]).toEqual({ status: "FAILED", calls_used: 1, tokens_used: 7 });
+    expect((await raw.query<{ count: number }>(`SELECT count(*)::int AS count FROM domain_events
+      WHERE aggregate_id=(SELECT id FROM research_jobs WHERE public_id=$1)
+        AND event_type='research_job_failed'`, [job.publicId])).rows[0]!.count).toBe(1);
+  });
+
+  it("gives cancellation precedence over a concurrent worker failure", async () => {
+    const policyAdmin = await context("POLICY_ADMIN", "policy-cancel-race");
+    const validator = await context("VALIDATOR", "validator-cancel-race");
+    const jobs = new ResearchJobService(database);
+    const permit = await issue(validator, await eligible(policyAdmin, "cancel-race"), "cancel-race");
+    const job = await jobs.createFromAuthorization(permit.publicId);
+    await jobs.claim("race-worker", 30);
+    await Promise.allSettled([jobs.cancel(job.publicId), jobs.fail(job.publicId, "race-worker",
+      "SIMULATED_FAILURE", 1, { calls: 1, tokens: 2, costMinor: 0 })]);
+    expect((await raw.query<{ status: string }>(`SELECT status FROM research_jobs WHERE public_id=$1`,
+      [job.publicId])).rows[0]!.status).toBe("CANCELLED");
+    expect((await raw.query<{ count: number }>(`SELECT count(*)::int AS count FROM domain_events
+      WHERE aggregate_id=(SELECT id FROM research_jobs WHERE public_id=$1)
+        AND event_type='research_job_cancelled'`, [job.publicId])).rows[0]!.count).toBe(1);
+  });
+
+  it("accounts failed-attempt usage across bounded retries", async () => {
+    const policyAdmin = await context("POLICY_ADMIN", "policy-failed-usage");
+    const validator = await context("VALIDATOR", "validator-failed-usage");
+    const jobs = new ResearchJobService(database);
+    const permit = await issue(validator, await eligible(policyAdmin, "failed-usage"), "failed-usage",
+      { maxCalls: 2, maxTokens: 10, maxAttempts: 2 });
+    const job = await jobs.createFromAuthorization(permit.publicId);
+    await jobs.claim("usage-one", 30);
+    await jobs.fail(job.publicId, "usage-one", "FIRST_FAILURE", 1, { calls: 1, tokens: 4, costMinor: 0 });
+    await raw.query(`UPDATE research_jobs SET available_at=clock_timestamp() WHERE public_id=$1`, [job.publicId]);
+    await jobs.claim("usage-two", 30);
+    await jobs.fail(job.publicId, "usage-two", "FINAL_FAILURE", 1, { calls: 1, tokens: 6, costMinor: 0 });
+    const result = await raw.query<{ status: string; calls_used: number; tokens_used: string; attempts: number }>(
+      `SELECT status,calls_used,tokens_used,attempts FROM research_jobs WHERE public_id=$1`, [job.publicId]);
+    expect(result.rows[0]).toEqual({ status: "FAILED", calls_used: 2, tokens_used: 10, attempts: 2 });
+    expect((await raw.query<{ count: number }>(`SELECT count(*)::int AS count FROM research_job_attempt_usage
+      WHERE research_job_id=(SELECT id FROM research_jobs WHERE public_id=$1)`, [job.publicId])).rows[0]!.count).toBe(2);
+  });
+
+  it("writes exactly one event and Outbox message for every terminal transition", async () => {
+    const policyAdmin = await context("POLICY_ADMIN", "policy-terminal-events");
+    const validator = await context("VALIDATOR", "validator-terminal-events");
+    const jobs = new ResearchJobService(database);
+    for (const [suffix, outcome] of [["completed", "COMPLETED"], ["failed", "FAILED"],
+      ["cancelled", "CANCELLED"]] as const) {
+      const permit = await issue(validator, await eligible(policyAdmin, `terminal-${suffix}`, suffix === "completed"),
+        `terminal-${suffix}`, { maxAttempts: 1 });
+      const job = await jobs.createFromAuthorization(permit.publicId);
+      if (outcome === "CANCELLED") await jobs.cancel(job.publicId);
+      else {
+        await jobs.claim(`terminal-${suffix}`, 30);
+        if (outcome === "COMPLETED") await jobs.complete(job.publicId, `terminal-${suffix}`,
+          { calls: 1, tokens: 1, costMinor: 0 }, validOutput());
+        else await jobs.fail(job.publicId, `terminal-${suffix}`, "FINAL_FAILURE", 1,
+          { calls: 1, tokens: 1, costMinor: 0 });
+      }
+      const events = await raw.query<{ event_type: string; outbox_count: number }>(
+        `SELECT event.event_type,
+          (SELECT count(*)::int FROM outbox_messages WHERE event_id=event.event_id) AS outbox_count
+         FROM domain_events AS event JOIN research_jobs AS job ON job.id=event.aggregate_id
+         WHERE job.public_id=$1 AND event.event_type=$2`, [job.publicId, `research_job_${outcome.toLowerCase()}`]);
+      expect(events.rows).toEqual([{ event_type: `research_job_${outcome.toLowerCase()}`, outbox_count: 1 }]);
+    }
+  });
+
+  it("rejects malformed, provider-bearing and publication outputs", async () => {
+    const policyAdmin = await context("POLICY_ADMIN", "policy-invalid-output");
+    const validator = await context("VALIDATOR", "validator-invalid-output");
+    const jobs = new ResearchJobService(database);
+    const permit = await issue(validator, await eligible(policyAdmin, "invalid-output"), "invalid-output");
+    const job = await jobs.createFromAuthorization(permit.publicId);
+    await jobs.claim("output-worker", 30);
+    for (const output of [{}, { ...validOutput(), digest: "bad" },
+      { ...validOutput(), provider: "real-ai" }, { ...validOutput(), publication: true },
+      { ...validOutput(), extra: "field" }]) {
+      await expect(jobs.complete(job.publicId, "output-worker", { calls: 1, tokens: 1, costMinor: 0 }, output))
+        .rejects.toBeInstanceOf(ResearchValidationError);
+    }
+  });
+
+  it("makes repeated revocation state-idempotent without duplicate events", async () => {
+    const policyAdmin = await context("POLICY_ADMIN", "policy-repeat-revoke");
+    const validator = await context("VALIDATOR", "validator-repeat-revoke");
+    const service = new AuthorizationService(database);
+    const permit = await issue(validator, await eligible(policyAdmin, "repeat-revoke"), "repeat-revoke");
+    await service.revoke(validator, permit.publicId, "Withdrawn by reviewer", "revoke-first");
+    await service.revoke(validator, permit.publicId, "Withdrawn by reviewer", "revoke-second");
+    await expect(service.revoke(validator, permit.publicId, "Different reason", "revoke-third"))
+      .rejects.toBeInstanceOf(ResearchConflictError);
+    const count = await raw.query<{ count: number }>(`SELECT count(*)::int AS count FROM domain_events
+      WHERE event_type='authorization_revoked' AND aggregate_id=(SELECT id FROM authorizations WHERE public_id=$1)`,
+    [permit.publicId]);
+    expect(count.rows[0]!.count).toBe(1);
+  });
+
+  it("allows only a justified ADMIN exception while THRESHOLD remains current-eligibility bound", async () => {
+    const policyAdmin = await context("POLICY_ADMIN", "policy-admin-exception");
+    const validator = await context("VALIDATOR", "validator-admin-exception");
+    const proposal = await eligible(policyAdmin, "admin-exception");
+    await raw.query(`UPDATE proposals SET status='COLLECTING' WHERE public_id=$1`, [proposal]);
+    const base = { proposalPublicId: proposal, currency: "USD", maxCostMinor: 0,
+      maxDurationSeconds: 300, maxCalls: 2, maxTokens: 100, maxAttempts: 2,
+      expiresAt: new Date(Date.now() + 60_000) } as const;
+    await expect(new AuthorizationService(database).issue(validator, { ...base, type: "THRESHOLD",
+      idempotencyKey: "threshold-ineligible" })).rejects.toBeInstanceOf(ResearchAuthorizationError);
+    await expect(new AuthorizationService(database).issue(validator, { ...base, type: "ADMIN",
+      idempotencyKey: "admin-without-reason" })).rejects.toBeInstanceOf(ResearchValidationError);
+    const admin = await new AuthorizationService(database).issue(validator, { ...base, type: "ADMIN",
+      justification: "Explicit exception approved for deterministic investigation",
+      idempotencyKey: "admin-with-reason" });
+    expect((await new ResearchJobService(database).createFromAuthorization(admin.publicId)).status).toBe("QUEUED");
   });
 });

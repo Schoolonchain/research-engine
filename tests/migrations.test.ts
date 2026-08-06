@@ -49,7 +49,7 @@ describe("initial database migration", () => {
     `);
 
     const tableNames = result.rows.map((row) => row.table_name);
-    expect(tableNames).toHaveLength(41);
+    expect(tableNames).toHaveLength(42);
     expect(tableNames).toEqual(
       expect.arrayContaining([
         "abuse_signals",
@@ -84,6 +84,7 @@ describe("initial database migration", () => {
         "participation_subject_locks",
         "proposals",
         "research_jobs",
+        "research_job_attempt_usage",
         "research_mutation_receipts",
         "research_results",
         "schema_migrations",
@@ -276,10 +277,11 @@ describe("initial database migration", () => {
         INSERT INTO authorizations (
           proposal_id, type, status, policy_version, idempotency_key,
           max_cost_minor, currency, max_duration_seconds, max_calls,
-          max_tokens, expires_at
+          max_tokens, expires_at, policy_set_hash, admin_justification
         ) VALUES (
           $1, 'ADMIN', 'VALID', 1, 'test-authorization',
-          1000, 'EUR', 3600, 10, 10000, CURRENT_TIMESTAMP + INTERVAL '1 hour'
+          1000, 'EUR', 3600, 10, 10000, CURRENT_TIMESTAMP + INTERVAL '1 hour',
+          repeat('a', 64), 'Structural migration fixture'
         )
         RETURNING id
       `,

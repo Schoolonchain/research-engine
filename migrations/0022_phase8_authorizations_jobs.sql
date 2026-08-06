@@ -4,10 +4,14 @@ ALTER TABLE authorizations
   ADD COLUMN revocation_reason text CHECK (
     revocation_reason IS NULL OR char_length(revocation_reason) BETWEEN 1 AND 2000
   ),
+  ADD COLUMN admin_justification text CHECK (
+    admin_justification IS NULL OR char_length(admin_justification) BETWEEN 1 AND 2000
+  ),
   ADD CONSTRAINT authorizations_phase8_no_payment CHECK (type <> 'PAYMENT'),
   ADD CONSTRAINT authorizations_snapshot_complete CHECK (
-    (eligibility_score_run_id IS NULL AND policy_set_hash IS NULL)
-    OR (eligibility_score_run_id IS NOT NULL AND policy_set_hash IS NOT NULL)
+    policy_set_hash IS NOT NULL
+    AND (type = 'ADMIN' OR eligibility_score_run_id IS NOT NULL)
+    AND (type <> 'ADMIN' OR admin_justification IS NOT NULL)
   );
 
 ALTER TABLE research_jobs
@@ -17,6 +21,23 @@ ALTER TABLE research_jobs
   ADD COLUMN execution_output jsonb CHECK (
     execution_output IS NULL OR jsonb_typeof(execution_output) = 'object'
   );
+
+CREATE TABLE research_job_attempt_usage (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  research_job_id uuid NOT NULL REFERENCES research_jobs(id) ON DELETE RESTRICT,
+  attempt integer NOT NULL CHECK (attempt > 0),
+  calls_used integer NOT NULL CHECK (calls_used >= 0),
+  tokens_used bigint NOT NULL CHECK (tokens_used >= 0),
+  cost_minor bigint NOT NULL CHECK (cost_minor >= 0),
+  outcome text NOT NULL CHECK (outcome IN ('COMPLETED', 'FAILED', 'CANCELLED')),
+  error_code varchar(100),
+  recorded_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (research_job_id, attempt)
+);
+
+CREATE TRIGGER research_job_attempt_usage_append_only
+BEFORE UPDATE OR DELETE ON research_job_attempt_usage
+FOR EACH ROW EXECUTE FUNCTION prevent_scoring_history_mutation();
 
 CREATE INDEX research_jobs_lease_queue_idx
   ON research_jobs (status, available_at, priority DESC, created_at)

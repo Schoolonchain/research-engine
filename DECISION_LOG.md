@@ -630,6 +630,19 @@ propuesta no se considera aprobada hasta recibir confirmación humana.
   activación global ya no coincide.
 - Motivo: impedir traversals o ejecuciones que mezclen decisiones de políticas diferentes.
 
+## D-085 — Excepción ADMIN y cierre transaccional de intentos
+
+- Fecha: 2026-08-07
+- Estado: IMPLEMENTADA; PENDIENTE DE REAUDITORÍA DE FASE 8
+- Decisión: una Authorization `ADMIN` puede omitir únicamente la elegibilidad vigente si registra
+  actor, justificación restringida, snapshot observado y política activa. `THRESHOLD` continúa
+  ligada al snapshot elegible. Cada intento conserva consumo y toda transición terminal genera
+  evento y Outbox; lease y deadline se evalúan con reloj de base de datos después del bloqueo.
+- Motivo: aplicar la decisión humana sin convertir la excepción administrativa en un bypass de
+  autoridad, presupuestos, vigencia, consumo único, idempotencia o auditoría.
+- Consecuencia: respuestas tardías, carreras de cancelación, fallos y outputs fuera del simulador
+  determinista quedan cerrados sin incorporar IA, proveedores, PAYMENT o publicación.
+
 ## D-059 — Datos blockchain en tablas propias, no en sources
 
 - Fecha: 2026-07-27

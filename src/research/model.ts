@@ -11,13 +11,15 @@ export interface IssueAuthorizationInput extends AuthorizationLimits {
   readonly type: "ADMIN" | "THRESHOLD";
   readonly expiresAt: Date;
   readonly idempotencyKey: string;
+  /** Mandatory, restricted human justification for the ADMIN eligibility exception. */
+  readonly justification?: string;
 }
 
 export interface AuthorizationView {
   readonly publicId: string;
   readonly status: string;
   readonly policySetHash: string;
-  readonly eligibilityScoreRunId: string;
+  readonly eligibilityScoreRunId: string | null;
   readonly expiresAt: Date;
 }
 
