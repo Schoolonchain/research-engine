@@ -1,4 +1,4 @@
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 
 import type { TransactionalDatabase } from "../db/database.js";
 import {
@@ -25,6 +25,10 @@ interface SessionRow extends IdentityRow {
   readonly reauthenticated_at: Date;
   readonly expires_at: Date;
   readonly csrf_hash: string;
+}
+interface IssuedSessionRow {
+  readonly id: string;
+  readonly expires_at: Date;
 }
 
 function hash(value: string): string {
@@ -83,6 +87,14 @@ export class AdministrativeSessionService {
     const accessToken = opaqueToken();
     const csrfToken = opaqueToken();
     return this.database.transaction(async (tx) => {
+      await tx.query(
+        `WITH purge AS (
+           SELECT id FROM administrative_sessions
+           WHERE expires_at < CURRENT_TIMESTAMP - INTERVAL '24 hours'
+             OR revoked_at < CURRENT_TIMESTAMP - INTERVAL '24 hours'
+           ORDER BY expires_at LIMIT 100
+         ) DELETE FROM administrative_sessions WHERE id IN (SELECT id FROM purge)`,
+      );
       const identity = await tx.query<IdentityRow>(
         `SELECT id, actor_id, role FROM administrative_identities
          WHERE issuer = $1 AND subject = $2 AND status = 'ACTIVE'`,
@@ -90,7 +102,17 @@ export class AdministrativeSessionService {
       );
       const row = identity.rows[0];
       if (!row) throw new AdministrativeAuthenticationError("Unknown identity");
-      const inserted = await tx.query<{ expires_at: Date }>(
+      await tx.query(
+        `WITH excess AS (
+           SELECT id FROM administrative_sessions
+           WHERE identity_id = $1 AND revoked_at IS NULL
+             AND expires_at > CURRENT_TIMESTAMP
+           ORDER BY created_at DESC OFFSET 9
+         ) UPDATE administrative_sessions
+           SET revoked_at = CURRENT_TIMESTAMP WHERE id IN (SELECT id FROM excess)`,
+        [row.id],
+      );
+      const inserted = await tx.query<IssuedSessionRow>(
         `INSERT INTO administrative_sessions (
           identity_id, token_hash, csrf_hash, mfa_verified,
           authenticated_at, reauthenticated_at, expires_at
@@ -98,14 +120,24 @@ export class AdministrativeSessionService {
           $1,$2,$3,true,$4::timestamptz,$4::timestamptz,
           $4::timestamptz + ($5 * INTERVAL '1 second')
         )
-        RETURNING expires_at`,
+        RETURNING id, expires_at`,
         [row.id, hash(accessToken), hash(csrfToken), principal.authenticatedAt,
           this.sessionLifetimeSeconds],
+      );
+      const session = inserted.rows[0]!;
+      await tx.query(
+        `INSERT INTO administrative_action_audit (
+          actor_id, session_id, action, target_type, target_id,
+          correlation_id, details
+        ) VALUES ($1,$2,'administrative_session_issued','ADMINISTRATIVE_SESSION',
+          $2,$3,$4::jsonb)`,
+        [row.actor_id, session.id, randomUUID(),
+          JSON.stringify({ role: row.role, mfaVerified: true })],
       );
       return Object.freeze({
         accessToken,
         csrfToken,
-        expiresAt: inserted.rows[0]!.expires_at,
+        expiresAt: session.expires_at,
       });
     });
   }
@@ -153,12 +185,55 @@ export class AdministrativeSessionService {
     });
   }
 
-  public async revoke(context: AdministrativeContext): Promise<void> {
+  public async revoke(
+    context: AdministrativeContext,
+    idempotencyKey: string,
+  ): Promise<void> {
+    const key = boundedText(idempotencyKey, "idempotencyKey");
+    if (key.length < 8 || key.length > 200) {
+      throw new AdministrativeValidationError("Invalid idempotency key");
+    }
     await this.database.transaction(async (tx) => {
-      await tx.query(
+      const requestHash = hash(JSON.stringify({ sessionId: context.sessionId }));
+      const existing = await tx.query<{ request_hash: string }>(
+        `SELECT request_hash FROM administrative_mutation_receipts
+         WHERE identity_id = $1 AND operation = 'revoke_session'
+           AND idempotency_key = $2`, [context.identityId, key],
+      );
+      if (existing.rows[0]) {
+        if (existing.rows[0].request_hash !== requestHash) {
+          throw new AdministrativeAuthorizationError("Idempotency conflict");
+        }
+        return;
+      }
+      const session = await tx.query<{ actor_id: string }>(
+        `SELECT identity.actor_id FROM administrative_sessions AS session
+         JOIN administrative_identities AS identity ON identity.id = session.identity_id
+         WHERE session.id = $1 AND identity.id = $2 AND identity.actor_id = $3
+         FOR UPDATE OF session, identity`,
+        [context.sessionId, context.identityId, context.actorId],
+      );
+      if (!session.rows[0]) throw new AdministrativeAuthenticationError("Session not found");
+      const revoked = await tx.query(
         `UPDATE administrative_sessions SET revoked_at = CURRENT_TIMESTAMP
          WHERE id = $1 AND identity_id = $2 AND revoked_at IS NULL`,
         [context.sessionId, context.identityId],
+      );
+      const correlationId = randomUUID();
+      await tx.query(
+        `INSERT INTO administrative_action_audit (
+          actor_id, session_id, action, target_type, target_id,
+          correlation_id, details
+        ) VALUES ($1,$2,'administrative_session_revoked','ADMINISTRATIVE_SESSION',
+          $2,$3,$4::jsonb)`,
+        [context.actorId, context.sessionId, correlationId,
+          JSON.stringify({ revokedNow: revoked.rowCount === 1 })],
+      );
+      await tx.query(
+        `INSERT INTO administrative_mutation_receipts (
+          identity_id, operation, idempotency_key, request_hash, correlation_id
+        ) VALUES ($1,'revoke_session',$2,$3,$4)`,
+        [context.identityId, key, requestHash, correlationId],
       );
     });
   }

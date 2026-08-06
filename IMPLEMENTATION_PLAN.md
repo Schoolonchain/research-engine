@@ -303,7 +303,7 @@ Acciones críticas requieren identidad fuerte, permiso explícito y quedan audit
 - Roles separados `MODERATOR`, `POLICY_ADMIN` y `VALIDATOR`.
 - Moderación, activación, auditoría append-only, evento y Outbox transaccionales.
 - Cola de elegibles de solo lectura.
-- 605 tests pasan y 9 integraciones externas quedan omitidas; typecheck y build pasan.
+- 613 tests pasan y 9 integraciones externas quedan omitidas; typecheck y build pasan.
 - Cero Authorization, ResearchJob, cola de ejecución o IA creados por Fase 7.
 
 ### Gate

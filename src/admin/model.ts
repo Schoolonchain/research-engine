@@ -29,5 +29,19 @@ export interface AdministrativeSessionCredentials {
   readonly expiresAt: Date;
 }
 
+export interface EligibleQueueItem {
+  readonly publicId: string;
+  readonly title: string;
+  readonly scoreRunId: string;
+  readonly policySetHash: string;
+  readonly knowledgeRevision: number;
+  readonly updatedAt: Date;
+}
+
+export interface EligibleQueuePage {
+  readonly items: readonly EligibleQueueItem[];
+  readonly nextCursor: string | null;
+}
+
 export type ModeratedEntityType = "SOURCE" | "CLAIM" | "EVIDENCE";
 export type ModerationDecision = "ACCEPTED" | "REJECTED";

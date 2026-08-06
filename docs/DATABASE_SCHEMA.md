@@ -22,6 +22,7 @@ Fuentes ejecutables:
 - `migrations/0018_audit_reports.sql`
 - `migrations/0019_onchain_metrics.sql`
 - `migrations/0020_administrative_security.sql`
+- `migrations/0021_administrative_integrity.sql`
 
 ## Agregados principales
 

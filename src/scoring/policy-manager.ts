@@ -1,13 +1,14 @@
 import { createHash } from "node:crypto";
 
 import type { TransactionalDatabase } from "../db/database.js";
-import { EventStore } from "../events/event-store.js";
+import { EventStore, type AppendEventCommand } from "../events/event-store.js";
 import { randomUUID } from "node:crypto";
 import type { AdministrativeContext } from "../admin/model.js";
 import {
-  AdministrativeAuthorizationError,
-  AdministrativeReauthenticationRequiredError,
+  AdministrativeConflictError,
+  AdministrativeValidationError,
 } from "../admin/errors.js";
+import { assertAdministrativeAuthority } from "../admin/authority.js";
 import type { ScorePolicyConfig } from "./model.js";
 
 const DIMENSIONS = ["PRIORITY", "PROGRESS", "CONFIDENCE", "SUPPORT_COUNT"] as const;
@@ -74,28 +75,34 @@ export class ScorePolicyManager {
   public async activate(
     authority: AdministrativeContext,
     policy: ScorePolicyConfig,
+    mutationKey: string,
   ): Promise<void> {
     validateScorePolicy(policy);
+    const key = mutationKey.trim().normalize("NFC");
+    if (key.length < 8 || key.length > 200) {
+      throw new AdministrativeValidationError("Invalid idempotency key");
+    }
+    const activationRequestHash = createHash("sha256")
+      .update(canonical(policy)).digest("hex");
     await this.database.transaction(async (tx) => {
-      if (authority.role !== "POLICY_ADMIN" || !authority.mfaVerified) {
-        throw new AdministrativeAuthorizationError("Policy administration role required");
-      }
-      const verified = await tx.query<{ id: string }>(
-        `SELECT session.id
-         FROM administrative_sessions AS session
-         JOIN administrative_identities AS identity ON identity.id = session.identity_id
-         WHERE session.id = $1 AND identity.actor_id = $2
-           AND identity.role = 'POLICY_ADMIN' AND identity.status = 'ACTIVE'
-           AND session.mfa_verified = true AND session.revoked_at IS NULL
-           AND session.expires_at > CURRENT_TIMESTAMP
-           AND session.reauthenticated_at >= CURRENT_TIMESTAMP - INTERVAL '5 minutes'`,
-        [authority.sessionId, authority.actorId],
+      await assertAdministrativeAuthority(tx, authority, ["POLICY_ADMIN"], true);
+      const existingReceipt = await tx.query<{ request_hash: string }>(
+        `SELECT request_hash FROM administrative_mutation_receipts
+         WHERE identity_id = $1 AND operation = 'activate_score_policy'
+           AND idempotency_key = $2`,
+        [authority.identityId, key],
       );
-      if (!verified.rows[0]) {
-        throw new AdministrativeReauthenticationRequiredError(
-          "Fresh administrative reauthentication is required",
-        );
+      if (existingReceipt.rows[0]) {
+        if (existingReceipt.rows[0].request_hash !== activationRequestHash) {
+          throw new AdministrativeConflictError(
+            "Idempotency key was used for another policy",
+          );
+        }
+        return;
       }
+      await tx.query(
+        "SELECT name FROM administrative_locks WHERE name = 'policy_activation' FOR UPDATE",
+      );
       const fingerprints: Array<{ dimension: string; fingerprint: string }> = [];
       for (const dimension of DIMENSIONS) {
         const definition = { formula: FORMULAS[dimension] };
@@ -123,8 +130,15 @@ export class ScorePolicyManager {
       }
       const policySetHash = scorePolicySetFingerprint(fingerprints);
       const previous = await tx.query<{ version: number }>(
-        "SELECT DISTINCT version FROM score_policies WHERE status = 'ACTIVE'",
+        `SELECT DISTINCT version FROM score_policies WHERE status = 'ACTIVE'
+         ORDER BY version`,
       );
+      if (previous.rows.length > 1) {
+        throw new Error("Active score policy versions are inconsistent");
+      }
+      if (previous.rows[0]?.version === policy.version) {
+        throw new AdministrativeConflictError("Score policy version is already active");
+      }
       await tx.query(
         "UPDATE score_policies SET status = 'RETIRED' WHERE status = 'ACTIVE'",
       );
@@ -140,6 +154,17 @@ export class ScorePolicyManager {
         ) VALUES ($1,$2,$3,$4)`,
         [policy.version, previous.rows[0]?.version ?? null, correlationId, policySetHash],
       );
+      const invalidated = await tx.query<{ id: string; version: number }>(
+        "SELECT id, version FROM proposals WHERE status = 'ELIGIBLE' FOR UPDATE",
+      );
+      await tx.query(
+        `UPDATE proposals SET status = 'COLLECTING', version = version + 1,
+          eligibility_score_run_id = NULL,
+          eligibility_policy_set_hash = NULL,
+          eligibility_knowledge_revision = NULL,
+          updated_at = CURRENT_TIMESTAMP
+         WHERE status = 'ELIGIBLE'`,
+      );
       await tx.query(
         `INSERT INTO administrative_action_audit (
           actor_id, session_id, action, target_type, target_id,
@@ -153,7 +178,13 @@ export class ScorePolicyManager {
             policySetHash,
           })],
       );
-      await this.events.appendMany(tx, [{
+      await tx.query(
+        `INSERT INTO administrative_mutation_receipts (
+          identity_id, operation, idempotency_key, request_hash, correlation_id
+        ) VALUES ($1,'activate_score_policy',$2,$3,$4)`,
+        [authority.identityId, key, activationRequestHash, correlationId],
+      );
+      const commands: AppendEventCommand[] = [{
         eventId: randomUUID(),
         eventType: "score_policy_activated",
         eventVersion: 1,
@@ -167,7 +198,26 @@ export class ScorePolicyManager {
           previousPolicyVersion: previous.rows[0]?.version ?? null,
           policySetHash,
         },
-      }]);
+      }];
+      for (const proposal of invalidated.rows) {
+        commands.push({
+          eventId: randomUUID(),
+          eventType: "eligibility_snapshot_invalidated",
+          eventVersion: 1,
+          aggregateType: "proposal",
+          aggregateId: proposal.id,
+          expectedSequence: proposal.version,
+          actor: { type: "policy_admin", id: authority.actorId },
+          correlationId,
+          payload: {
+            cause: "score_policy_activated",
+            policyVersion: policy.version,
+            policySetHash,
+            executionStarted: false,
+          },
+        });
+      }
+      await this.events.appendMany(tx, commands);
     });
   }
 }

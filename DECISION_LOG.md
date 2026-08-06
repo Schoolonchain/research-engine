@@ -517,6 +517,45 @@ propuesta no se considera aprobada hasta recibir confirmación humana.
   Authorization, ResearchJob, cola de ejecución, presupuesto o IA.
 - Motivo: mantener intacto el gate humano y técnico de la Fase 8.
 
+## D-071 — Autoridad administrativa revalidada transaccionalmente
+
+- Fecha: 2026-08-06
+- Estado: CORRECCIÓN DE AUDITORÍA; PENDIENTE DE APROBACIÓN HUMANA DE FASE 7
+- Decisión: moderate, listEligible y activación bloquean y revalidan sesión, identidad, rol,
+  MFA, vigencia y revocación dentro de su propia transacción.
+- Motivo: un contexto autenticado previamente no conserva autoridad después de un cambio.
+
+## D-072 — Elegibilidad ligada a snapshot vigente
+
+- Fecha: 2026-08-06
+- Estado: CORRECCIÓN DE AUDITORÍA; PENDIENTE DE APROBACIÓN HUMANA DE FASE 7
+- Decisión: ligar la cola a scoreRunId, policySetHash y knowledgeRevision; moderación y
+  activación invalidan el snapshot y solo el recálculo readquiere elegibilidad.
+- Motivo: impedir revisión humana basada en conocimiento o políticas obsoletos.
+
+## D-073 — Motivo restringido y semántica reasonProvided
+
+- Fecha: 2026-08-06
+- Estado: CORRECCIÓN DE AUDITORÍA; PENDIENTE DE APROBACIÓN HUMANA DE FASE 7
+- Decisión: persistir el motivo solo en auditoría administrativa restringida y publicar en el
+  evento únicamente `reasonProvided: true`.
+- Motivo: conservar responsabilidad sin copiar texto administrativo al Event Log duradero.
+
+## D-074 — Mutaciones administrativas idempotentes
+
+- Fecha: 2026-08-06
+- Estado: CORRECCIÓN DE AUDITORÍA; PENDIENTE DE APROBACIÓN HUMANA DE FASE 7
+- Decisión: exigir claves idempotentes y recibos append-only para moderación, activación,
+  revocación de sesiones y cambios de identidad.
+- Motivo: reintentos no deben duplicar transiciones, auditoría ni eventos.
+
+## D-075 — Activación global serializada
+
+- Fecha: 2026-08-06
+- Estado: CORRECCIÓN DE AUDITORÍA; PENDIENTE DE APROBACIÓN HUMANA DE FASE 7
+- Decisión: serializar activaciones mediante un lock persistente y numerarlas secuencialmente.
+- Motivo: previous_policy_version debe formar una cadena total incluso con administradores concurrentes.
+
 ## D-059 — Datos blockchain en tablas propias, no en sources
 
 - Fecha: 2026-07-27

@@ -10,6 +10,10 @@ La creación de sesión exige MFA. Los tokens de acceso y CSRF son aleatorios y 
 SHA-256 se conservan. PostgreSQL comprueba expiración y revocación. Toda mutación HTTP exige
 el token de sesión y un token CSRF independiente.
 
+Las sesiones se limitan a diez activas por identidad. Las expiradas o revocadas se purgan en
+lotes después de 24 horas; la auditoría conserva el UUID histórico sin una FK que impida la
+purga. Emisión y revocación producen entradas append-only sin guardar tokens.
+
 El proveedor IdP real, sus claves de verificación y el enrolamiento MFA son adaptadores de
 despliegue pendientes; el núcleo no almacena contraseñas ni secretos del proveedor.
 
@@ -22,12 +26,27 @@ despliegue pendientes; el núcleo no almacena contraseñas ni secretos del prove
 
 Los roles no son intercambiables. El servicio de activación vuelve a verificar sesión, rol,
 MFA, vigencia y reautenticación dentro de su transacción; un contexto fabricado no basta.
+Moderación y cola revalidan igualmente identidad, rol, MFA, vigencia y revocación dentro de
+la misma transacción y bloquean las filas de autoridad durante la operación.
 
 ## Auditoría
 
 Moderación y activación escriben `administrative_action_audit`, evento de dominio y Outbox
 dentro de la misma operación. La auditoría es append-only. Los motivos no se copian al Event
-Log: solo se registra que existe un motivo, reduciendo retención de contenido administrativo.
+Log: el evento usa `reasonProvided`; el texto se conserva exclusivamente en la tabla de
+auditoría administrativa restringida.
+
+Toda moderación, activación, revocación de sesión y modificación de identidad exige una
+`Idempotency-Key`. Un recibo append-only liga identidad, operación, clave, hash de solicitud y
+correlación. Repetir la misma solicitud no muta; reutilizar la clave con otro contenido falla.
+
+## Vigencia de elegibilidad
+
+Una entrada en la cola liga Proposal, `score_run`, `policySetHash` y `knowledge_revision`.
+Solo aparece si el run fue elegible, su política sigue siendo la activación más reciente y la
+revisión de conocimiento coincide. Moderar conocimiento o activar otra política invalida la
+elegibilidad y devuelve la Proposal a `COLLECTING`; solo un recálculo puede adquirirla otra vez.
+La cola usa cursor opaco y límites de 1–100 elementos.
 
 ## Límites deliberados
 

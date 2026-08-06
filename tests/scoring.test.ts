@@ -80,7 +80,7 @@ describe("Phase 6 scoring and eligibility", () => {
       progressThreshold: 0.3,
       confidenceThreshold: 0.4,
       minimumSupports: 3,
-    });
+    }, "activate-score-policy-1");
   });
 
   afterEach(async () => raw.close());
@@ -110,14 +110,14 @@ describe("Phase 6 scoring and eligibility", () => {
       progressThreshold: 0,
       confidenceThreshold: 0,
       minimumSupports: 0,
-    })).rejects.toThrow("immutable");
+    }, "activate-score-policy-conflict")).rejects.toThrow("immutable");
     await manager.activate(policyAdmin, {
       version: 2,
       priorityThreshold: 0.6,
       progressThreshold: 0.4,
       confidenceThreshold: 0.5,
       minimumSupports: 5,
-    });
+    }, "activate-score-policy-2");
     const active = await raw.query<{ version: number; count: number }>(
       `SELECT version, count(*)::int AS count FROM score_policies
        WHERE status = 'ACTIVE' GROUP BY version`,

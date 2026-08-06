@@ -9,6 +9,7 @@ import type { AdministrationService } from "./administration-service.js";
 import {
   AdministrativeAuthenticationError,
   AdministrativeAuthorizationError,
+  AdministrativeConflictError,
   AdministrativeNotFoundError,
   AdministrativeReauthenticationRequiredError,
   AdministrativeValidationError,
@@ -48,11 +49,25 @@ function string(value: unknown, label: string): string {
   return value;
 }
 
+function mutationKey(request: FastifyRequest): string {
+  const value = request.headers["idempotency-key"];
+  if (typeof value !== "string") {
+    throw new AdministrativeValidationError("Idempotency-Key is required");
+  }
+  return value;
+}
+
 export function buildAdministrationApi(
   dependencies: AdministrationApiDependencies,
 ): FastifyInstance {
   const app = Fastify({ logger: false, bodyLimit: 10_000, requestTimeout: 10_000 });
   app.setErrorHandler((error, _request, reply) => {
+    if ((error as { statusCode?: number }).statusCode === 413) {
+      return reply.status(413).send({ error: "PAYLOAD_TOO_LARGE" });
+    }
+    if ((error as { statusCode?: number }).statusCode === 400) {
+      return reply.status(400).send({ error: "INVALID_REQUEST" });
+    }
     if (error instanceof AdministrativeValidationError) {
       return reply.status(400).send({ error: "INVALID_REQUEST" });
     }
@@ -67,6 +82,9 @@ export function buildAdministrationApi(
     }
     if (error instanceof AdministrativeNotFoundError) {
       return reply.status(404).send({ error: "NOT_FOUND" });
+    }
+    if (error instanceof AdministrativeConflictError) {
+      return reply.status(409).send({ error: "CONFLICT" });
     }
     return reply.status(500).send({ error: "INTERNAL_ERROR" });
   });
@@ -83,16 +101,17 @@ export function buildAdministrationApi(
       request.headers["x-csrf-token"] as string | undefined,
       true,
     );
-    await dependencies.sessions.revoke(context);
+    await dependencies.sessions.revoke(context, mutationKey(request));
     return reply.status(204).send();
   });
 
   app.get("/admin/eligible", async (request) => {
     const context = await dependencies.sessions.authenticate(bearer(request));
-    const query = request.query as { limit?: string };
+    const query = request.query as { limit?: string; cursor?: string };
     return dependencies.administration.listEligible(
       context,
       query.limit === undefined ? 50 : Number(query.limit),
+      query.cursor,
     );
   });
 
@@ -114,6 +133,7 @@ export function buildAdministrationApi(
       string(params.publicId, "publicId"),
       string(input["decision"], "decision") as ModerationDecision,
       string(input["reason"], "reason"),
+      mutationKey(request),
     );
     return reply.status(204).send();
   });
@@ -138,7 +158,29 @@ export function buildAdministrationApi(
     } catch {
       throw new AdministrativeValidationError("Invalid score policy");
     }
-    await dependencies.policies.activate(context, policy);
+    await dependencies.policies.activate(context, policy, mutationKey(request));
+    return reply.status(204).send();
+  });
+
+  app.patch("/admin/identities/:identityId", async (request, reply) => {
+    const context = await dependencies.sessions.authenticate(
+      bearer(request),
+      request.headers["x-csrf-token"] as string | undefined,
+      true,
+    );
+    const params = request.params as { identityId?: unknown };
+    const input = body(request);
+    const change = {
+      ...(input["role"] === undefined ? {} : { role: input["role"] as "MODERATOR" | "POLICY_ADMIN" | "VALIDATOR" }),
+      ...(input["status"] === undefined ? {} : { status: input["status"] as "ACTIVE" | "SUSPENDED" | "REVOKED" }),
+    };
+    await dependencies.administration.changeIdentity(
+      context,
+      string(params.identityId, "identityId"),
+      change,
+      string(input["reason"], "reason"),
+      mutationKey(request),
+    );
     return reply.status(204).send();
   });
 

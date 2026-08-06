@@ -1,0 +1,52 @@
+ALTER TABLE proposals
+  ADD COLUMN knowledge_revision bigint NOT NULL DEFAULT 0 CHECK (knowledge_revision >= 0),
+  ADD COLUMN eligibility_score_run_id uuid REFERENCES score_runs(id) ON DELETE RESTRICT,
+  ADD COLUMN eligibility_policy_set_hash char(64),
+  ADD COLUMN eligibility_knowledge_revision bigint CHECK (eligibility_knowledge_revision >= 0),
+  ADD CONSTRAINT proposals_eligibility_snapshot_complete CHECK (
+    (eligibility_score_run_id IS NULL
+      AND eligibility_policy_set_hash IS NULL
+      AND eligibility_knowledge_revision IS NULL)
+    OR
+    (eligibility_score_run_id IS NOT NULL
+      AND eligibility_policy_set_hash IS NOT NULL
+      AND eligibility_knowledge_revision IS NOT NULL)
+  );
+
+ALTER TABLE score_runs
+  ADD COLUMN policy_set_hash char(64),
+  ADD COLUMN knowledge_revision bigint CHECK (knowledge_revision >= 0);
+
+ALTER TABLE score_policy_activations
+  ADD COLUMN activation_sequence bigserial UNIQUE;
+
+ALTER TABLE administrative_action_audit
+  ADD COLUMN reason text CHECK (reason IS NULL OR char_length(reason) BETWEEN 1 AND 2000);
+
+ALTER TABLE administrative_action_audit
+  DROP CONSTRAINT administrative_action_audit_session_id_fkey;
+
+CREATE TABLE administrative_mutation_receipts (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  identity_id uuid NOT NULL REFERENCES administrative_identities(id) ON DELETE RESTRICT,
+  operation text NOT NULL CHECK (char_length(operation) BETWEEN 1 AND 100),
+  idempotency_key varchar(200) NOT NULL,
+  request_hash char(64) NOT NULL,
+  correlation_id uuid NOT NULL UNIQUE,
+  created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (identity_id, operation, idempotency_key)
+);
+
+CREATE TRIGGER administrative_mutation_receipts_append_only
+BEFORE UPDATE OR DELETE ON administrative_mutation_receipts
+FOR EACH ROW EXECUTE FUNCTION prevent_scoring_history_mutation();
+
+CREATE TABLE administrative_locks (
+  name text PRIMARY KEY CHECK (char_length(name) BETWEEN 1 AND 100)
+);
+
+INSERT INTO administrative_locks (name) VALUES ('policy_activation');
+
+CREATE INDEX proposals_fresh_eligibility_idx
+  ON proposals (updated_at, public_id)
+  WHERE status = 'ELIGIBLE' AND eligibility_score_run_id IS NOT NULL;
