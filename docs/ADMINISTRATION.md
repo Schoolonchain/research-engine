@@ -50,13 +50,15 @@ Proposals: todos los consumidores rechazan el snapshot obsoleto mediante el hash
 siguiente recálculo actualiza individualmente cada Proposal. La moderación sí invalida la
 Proposal afectada porque cambia su propia revisión de conocimiento.
 El guard compartido `current_proposal_eligibility` gobierna tanto la cola administrativa como
-`ProposalService.get/list`. Una Proposal persistida como `ELIGIBLE` cuyo snapshot ya no sea
-vigente se representa públicamente como `COLLECTING`; el estado físico se conserva hasta el
-recálculo individual.
+`ProposalService.get/list`. La representación pública conserva siempre el estado escrito y
+expone por separado `eligibilitySnapshotCurrent`. Así, una Proposal puede declarar
+`status: ELIGIBLE` y `eligibilitySnapshotCurrent: false` sin inventar una transición a
+`COLLECTING`; esa transición solo puede escribirla el recálculo individual.
 
-La cola usa cursor opaco y límites de 1–100 elementos. Su orden, comparación de cursor e índice
-parcial comparten exactamente `(proposal.updated_at, proposal.public_id)`. El UUID resuelve
-empates de timestamp y evita depender de `score_runs.created_at`, que no pertenece al índice.
+La cola usa cursor opaco y límites de 1–100 elementos. Avanza por el `public_id` inmutable e
+indexado de Proposal y vincula el cursor al `scoreRunId` inmutable del snapshot entregado. El
+servidor valida que ambos pertenecieron al mismo snapshot antes de continuar. Recalcular una
+Proposal ya entregada no la desplaza a una página posterior ni produce duplicados.
 
 ### Migración de Proposals elegibles previas
 

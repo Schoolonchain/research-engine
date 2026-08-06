@@ -8,10 +8,10 @@ Estado: correcciones implementadas en la PR #15; pendiente de reauditoría.
   `policySetHash` y `knowledgeRevision`.
 - La activación no modifica Proposals: el `policySetHash` global oculta snapshots obsoletos y
   el siguiente recálculo actualiza cada Proposal individualmente.
-- El guard SQL compartido también corrige la representación pública: un `ELIGIBLE` obsoleto
-  aparece como `COLLECTING` en `ProposalService.get/list` y queda fuera de la cola.
-- Orden, cursor e índice de la cola usan `(proposal.updated_at, proposal.public_id)`; pruebas
-  adversariales cubren timestamps empatados y `score_runs.created_at` en orden contrario.
+- El guard SQL compartido expone `eligibilitySnapshotCurrent` sin sustituir silenciosamente
+  `ELIGIBLE`; la cola sigue excluyendo snapshots obsoletos.
+- El cursor avanza por `publicId` y queda vinculado al `scoreRunId` inmutable del snapshot;
+  una prueba adversarial recalcula la primera Proposal entre páginas sin duplicarla.
 - Las activaciones usan un lock global y `activation_sequence`; las pruebas concurrentes
   verifican la cadena `previous_policy_version`.
 - El motivo se conserva solo en auditoría restringida y el evento declara

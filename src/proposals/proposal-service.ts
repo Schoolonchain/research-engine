@@ -34,6 +34,7 @@ interface ProposalRow {
   readonly central_question: string;
   readonly description: string;
   readonly status: string;
+  readonly eligibility_snapshot_current?: boolean;
   readonly visibility: ProposalVisibility;
   readonly status_reason: string | null;
   readonly support_count: string;
@@ -59,6 +60,7 @@ function proposal(row: ProposalRow): Proposal {
     centralQuestion: row.central_question,
     description: row.description,
     status: row.status,
+    eligibilitySnapshotCurrent: row.eligibility_snapshot_current ?? false,
     visibility: row.visibility,
     statusReason: row.status_reason,
     supportCount: Number(row.support_count),
@@ -99,8 +101,7 @@ async function selectPublic(
 ): Promise<ProposalRow> {
   const result = await transaction.query<ProposalRow>(
     `SELECT stored.*,
-       CASE WHEN stored.status = 'ELIGIBLE' AND current.proposal_id IS NULL
-         THEN 'COLLECTING' ELSE stored.status END AS status
+       (current.proposal_id IS NOT NULL) AS eligibility_snapshot_current
      FROM proposals AS stored
      LEFT JOIN current_proposal_eligibility AS current
        ON current.proposal_id = stored.id
@@ -225,8 +226,7 @@ export class ProposalService {
       const result = await transaction.query<ProposalRow>(
         `
           SELECT stored.*,
-            CASE WHEN stored.status = 'ELIGIBLE' AND current.proposal_id IS NULL
-              THEN 'COLLECTING' ELSE stored.status END AS status
+            (current.proposal_id IS NOT NULL) AS eligibility_snapshot_current
           FROM proposals AS stored
           LEFT JOIN current_proposal_eligibility AS current
             ON current.proposal_id = stored.id

@@ -70,12 +70,12 @@ async function alreadyApplied(
   return true;
 }
 
-function encodeCursor(updatedAt: Date, publicId: string): string {
-  return Buffer.from(JSON.stringify([updatedAt.toISOString(), publicId]), "utf8")
+function encodeCursor(publicId: string, scoreRunId: string): string {
+  return Buffer.from(JSON.stringify([publicId, scoreRunId]), "utf8")
     .toString("base64url");
 }
 
-function decodeCursor(value: string | undefined): readonly [Date, string] | null {
+function decodeCursor(value: string | undefined): readonly [string, string] | null {
   if (value === undefined) return null;
   if (value.length < 1 || value.length > 500) {
     throw new AdministrativeValidationError("Invalid cursor");
@@ -84,9 +84,9 @@ function decodeCursor(value: string | undefined): readonly [Date, string] | null
     const parsed = JSON.parse(Buffer.from(value, "base64url").toString("utf8"));
     if (!Array.isArray(parsed) || parsed.length !== 2 ||
       typeof parsed[0] !== "string" || typeof parsed[1] !== "string") throw new Error();
-    const date = new Date(parsed[0]);
-    if (!Number.isFinite(date.getTime()) || !/^[0-9a-f-]{36}$/i.test(parsed[1])) throw new Error();
-    return [date, parsed[1]];
+    if (!/^[0-9a-f-]{36}$/i.test(parsed[0]) ||
+      !/^[0-9a-f-]{36}$/i.test(parsed[1])) throw new Error();
+    return [parsed[0], parsed[1]];
   } catch {
     throw new AdministrativeValidationError("Invalid cursor");
   }
@@ -235,6 +235,17 @@ export class AdministrationService {
       await assertAdministrativeAuthority(
         tx, context, ["MODERATOR", "VALIDATOR", "POLICY_ADMIN"],
       );
+      if (after) {
+        const cursorSnapshot = await tx.query<{ present: boolean }>(
+          `SELECT true AS present FROM score_runs AS run
+           JOIN proposals AS proposal ON proposal.id = run.proposal_id
+           WHERE proposal.public_id = $1 AND run.id = $2`,
+          [after[0], after[1]],
+        );
+        if (!cursorSnapshot.rows[0]) {
+          throw new AdministrativeValidationError("Invalid cursor snapshot");
+        }
+      }
       const result = await tx.query<{
         public_id: string; title: string; updated_at: Date; score_run_id: string;
         policy_set_hash: string; knowledge_revision: string;
@@ -246,10 +257,9 @@ export class AdministrationService {
          JOIN current_proposal_eligibility AS current
            ON current.proposal_id = proposal.id
          WHERE proposal.status = 'ELIGIBLE'
-           AND ($1::timestamptz IS NULL OR
-             (proposal.updated_at, proposal.public_id) > ($1::timestamptz, $2::uuid))
-         ORDER BY proposal.updated_at, proposal.public_id LIMIT $3`,
-        [after?.[0] ?? null, after?.[1] ?? null, limit + 1],
+           AND ($1::uuid IS NULL OR proposal.public_id > $1::uuid)
+         ORDER BY proposal.public_id LIMIT $2`,
+        [after?.[0] ?? null, limit + 1],
       );
       const pageRows = result.rows.slice(0, limit);
       const items = pageRows.map((row) => Object.freeze({
@@ -264,7 +274,7 @@ export class AdministrationService {
       return Object.freeze({
         items: Object.freeze(items),
         nextCursor: result.rows.length > limit && last
-          ? encodeCursor(last.updated_at, last.public_id) : null,
+          ? encodeCursor(last.public_id, last.score_run_id) : null,
       });
     });
   }

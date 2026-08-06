@@ -356,7 +356,9 @@ describe("Phase 7 administrative security", () => {
     const proposals = new ProposalService(database);
     const before = await administration.listEligible(validator.context);
     expect(before.items).toHaveLength(1);
-    expect((await proposals.get(entity.proposalPublicId)).status).toBe("ELIGIBLE");
+    expect(await proposals.get(entity.proposalPublicId)).toMatchObject({
+      status: "ELIGIBLE", eligibilitySnapshotCurrent: true,
+    });
     const beforeState = await raw.query<{ version: number }>(
       "SELECT version FROM proposals WHERE public_id = $1", [entity.proposalPublicId],
     );
@@ -366,10 +368,12 @@ describe("Phase 7 administrative security", () => {
       confidenceThreshold: 0.4, minimumSupports: 3,
     }, "activate-policy-freshness-2");
     expect((await administration.listEligible(validator.context)).items).toHaveLength(0);
-    expect((await proposals.get(entity.proposalPublicId)).status).toBe("COLLECTING");
+    expect(await proposals.get(entity.proposalPublicId)).toMatchObject({
+      status: "ELIGIBLE", eligibilitySnapshotCurrent: false,
+    });
     expect((await proposals.list(undefined, 100, 0)).find(
       (item) => item.publicId === entity.proposalPublicId,
-    )?.status).toBe("COLLECTING");
+    )).toMatchObject({ status: "ELIGIBLE", eligibilitySnapshotCurrent: false });
     const stale = await raw.query<{
       status: string; score_run_id: string; policy_set_hash: string; version: number;
     }>(
@@ -393,7 +397,9 @@ describe("Phase 7 administrative security", () => {
     const after = await administration.listEligible(validator.context);
     expect(after.items).toHaveLength(1);
     expect(after.items[0]!.policySetHash).not.toBe(before.items[0]!.policySetHash);
-    expect((await proposals.get(entity.proposalPublicId)).status).toBe("ELIGIBLE");
+    expect(await proposals.get(entity.proposalPublicId)).toMatchObject({
+      status: "ELIGIBLE", eligibilitySnapshotCurrent: true,
+    });
   });
 
   it("serializes concurrent activations into a correct previous-version chain", async () => {
@@ -501,35 +507,38 @@ describe("Phase 7 administrative security", () => {
     expect(count.rows[0]).toEqual({ active: 10, total: 16 });
   });
 
-  it("paginates the fresh eligible queue with an opaque cursor", async () => {
+  it("paginates by immutable snapshot identity across an intervening recalculation", async () => {
     const policyAdmin = await context("POLICY_ADMIN", "cursor-policy-admin");
     const validator = await context("VALIDATOR", "cursor-validator");
     const one = await createEligible(policyAdmin.context, "cursor-one");
     const two = await createEligible(policyAdmin.context, "cursor-two", false);
     const three = await createEligible(policyAdmin.context, "cursor-three", false);
-    await raw.query(
-      `UPDATE proposals SET updated_at = '2026-01-01T00:00:00Z'
-       WHERE public_id = ANY($1::uuid[])`,
-      [[one.proposalPublicId, two.proposalPublicId]],
-    );
-    await raw.query(
-      `UPDATE proposals SET updated_at = '2020-01-01T00:00:00Z'
-       WHERE public_id = $1`, [three.proposalPublicId],
-    );
     const administration = new AdministrationService(database);
-    const seen: string[] = [];
-    let cursor: string | undefined;
-    do {
+    const first = await administration.listEligible(validator.context, 1);
+    expect(first.items).toHaveLength(1);
+    expect(first.nextCursor).not.toBeNull();
+    const firstItem = first.items[0]!;
+    await new ScoreService(database).recalculate(firstItem.publicId);
+    const replacement = await raw.query<{ score_run_id: string }>(
+      `SELECT eligibility_score_run_id AS score_run_id FROM proposals
+       WHERE public_id = $1`, [firstItem.publicId],
+    );
+    expect(replacement.rows[0]!.score_run_id).not.toBe(firstItem.scoreRunId);
+
+    const seen = [firstItem.publicId];
+    let cursor: string | undefined = first.nextCursor!;
+    while (cursor) {
       const page = await administration.listEligible(validator.context, 1, cursor);
       expect(page.items).toHaveLength(1);
       seen.push(page.items[0]!.publicId);
       cursor = page.nextCursor ?? undefined;
-    } while (cursor);
-    expect(seen).toEqual([
-      three.proposalPublicId,
-      ...[one.proposalPublicId, two.proposalPublicId].sort(),
-    ]);
+    }
+    expect(seen).toEqual(
+      [one.proposalPublicId, two.proposalPublicId, three.proposalPublicId].sort(),
+    );
     expect(new Set(seen).size).toBe(3);
+    const decoded = JSON.parse(Buffer.from(first.nextCursor!, "base64url").toString("utf8"));
+    expect(decoded).toEqual([firstItem.publicId, firstItem.scoreRunId]);
   });
 
   it("uses injected IdP proof and rejects claimed roles and CSRF bypasses", async () => {

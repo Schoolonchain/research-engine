@@ -102,7 +102,7 @@ describe("initial database migration", () => {
       `SELECT indexdef FROM pg_indexes
        WHERE schemaname = 'public' AND indexname = 'proposals_fresh_eligibility_idx'`,
     );
-    expect(index.rows[0]!.indexdef).toContain("(updated_at, public_id)");
+    expect(index.rows[0]!.indexdef).toContain("(public_id)");
   });
 
   it("models sources, claims and evidence as separate related entities", async () => {

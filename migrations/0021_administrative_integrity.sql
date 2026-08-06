@@ -52,7 +52,7 @@ CREATE TABLE administrative_locks (
 INSERT INTO administrative_locks (name) VALUES ('policy_activation');
 
 CREATE INDEX proposals_fresh_eligibility_idx
-  ON proposals (updated_at, public_id)
+  ON proposals (public_id)
   WHERE status = 'ELIGIBLE' AND eligibility_score_run_id IS NOT NULL;
 
 CREATE VIEW current_proposal_eligibility AS

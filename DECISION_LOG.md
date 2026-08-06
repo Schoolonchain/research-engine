@@ -578,17 +578,18 @@ propuesta no se considera aprobada hasta recibir confirmación humana.
 - Fecha: 2026-08-06
 - Estado: CORRECCIÓN DE AUDITORÍA; PENDIENTE DE APROBACIÓN HUMANA DE FASE 7
 - Decisión: centralizar la vigencia en la vista `current_proposal_eligibility`; la cola y las
-  lecturas públicas consumen el mismo guard. Un `ELIGIBLE` físico obsoleto se publica como
-  `COLLECTING` hasta el siguiente recálculo individual.
+  lecturas públicas consumen el mismo guard. La API conserva `status: ELIGIBLE` y expone
+  `eligibilitySnapshotCurrent: false` cuando el snapshot está obsoleto.
 - Motivo: ningún consumidor debe interpretar como vigente un snapshot rechazado por otro.
 
 ## D-079 — Cursor e índice con una misma clave total
 
 - Fecha: 2026-08-06
 - Estado: CORRECCIÓN DE AUDITORÍA; PENDIENTE DE APROBACIÓN HUMANA DE FASE 7
-- Decisión: ordenar, cursorizar e indexar la cola por `(proposal.updated_at, public_id)`.
-- Motivo: el UUID desempata timestamps y la consulta puede usar el índice parcial sin mezclar
-  `score_runs.created_at`, evitando omisiones y duplicados entre páginas.
+- Decisión: avanzar por `proposal.public_id`, indexarlo y vincular cada cursor al `scoreRunId`
+  inmutable del snapshot entregado, cuya pertenencia se valida al continuar.
+- Motivo: un recálculo cambia el snapshot y `updated_at`, pero no debe reinsertar en páginas
+  posteriores una Proposal que el consumidor ya recibió.
 
 ## D-059 — Datos blockchain en tablas propias, no en sources
 
