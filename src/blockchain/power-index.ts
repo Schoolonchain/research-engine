@@ -23,10 +23,21 @@ export interface PowerIndexResult {
   readonly computedAt: Date;
 }
 
-const WEIGHT_BALANCE = 0.3;
+// H-03: getdelegatedresourceaccountindexV2 returns 405 on TronGrid's public
+// API, so delegation data is usually empty (delegatedToCount = 0 for all).
+// Until TronGrid re-enables the endpoint or we add a TronScan-based fallback,
+// the delegation weight is dead weight.  Redistribute its share to balance and
+// energy so the Power Index remains a 100% weighted sum.
+//
+// Original weights: balance=0.30, voting=0.40, delegation=0.15, energy=0.15
+// Adjusted weights: balance=0.35, voting=0.40, delegation=0.05, energy=0.20
+//
+// Delegation keeps a small token weight (5%) so that if the endpoint starts
+// working again, the data isn't completely ignored.
+const WEIGHT_BALANCE = 0.35;
 const WEIGHT_VOTING_POWER = 0.4;
-const WEIGHT_DELEGATIONS = 0.15;
-const WEIGHT_ENERGY = 0.15;
+const WEIGHT_DELEGATIONS = 0.05;
+const WEIGHT_ENERGY = 0.20;
 
 function normalize(value: number, max: number): number {
   if (max <= 0) return 0;
