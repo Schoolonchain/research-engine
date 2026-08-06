@@ -1,0 +1,84 @@
+# Live TRON integration tests — runs against real TronGrid/TronScan APIs.
+#
+# NOT a required check for merging PRs.  A failure here means the live
+# blockchain environment changed or returned unexpected data; it does not
+# imply the codebase is broken.  Deterministic correctness is covered by
+# the CI workflow (ci.yml).
+#
+# Trigger modes:
+#   • Manual          — workflow_dispatch (any branch)
+#   • Scheduled       — daily at 06:00 UTC
+#   • Push to on-chain branches — branches matching **/on-chain/** or **/blockchain/**
+
+name: TRON Live Integration
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 6 * * *"            # daily 06:00 UTC
+  push:
+    branches:
+      - "**/on-chain/**"
+      - "**/blockchain/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tron-live-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tron-live:
+    name: TRON live checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    # Only run when at least one API key is available.
+    # On forks or repos without secrets this job is skipped, not failed.
+    if: ${{ secrets.TRONGRID_API_KEY != '' }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+
+      # ── Live integration tests (vitest, auto-skip without keys) ──
+      - name: Integration tests (TRON)
+        run: pnpm test -- tests/tron-integration.test.ts
+        env:
+          TRONGRID_API_KEY: ${{ secrets.TRONGRID_API_KEY }}
+          TRONSCAN_API_KEY: ${{ secrets.TRONSCAN_API_KEY }}
+
+      # ── Script-based live probes ──
+      - name: TRON integration demo
+        run: pnpm exec tsx scripts/test-tron-real.ts
+        env:
+          TRONGRID_API_KEY: ${{ secrets.TRONGRID_API_KEY }}
+
+      - name: TRON multi-source comparison
+        if: ${{ env.TRONSCAN_API_KEY != '' }}
+        run: pnpm exec tsx scripts/compare-sources.ts
+        env:
+          TRONGRID_API_KEY: ${{ secrets.TRONGRID_API_KEY }}
+          TRONSCAN_API_KEY: ${{ secrets.TRONSCAN_API_KEY }}
+
+      - name: TRON full audit
+        run: pnpm exec tsx scripts/tron-audit.ts
+        timeout-minutes: 8
+        env:
+          TRONGRID_API_KEY: ${{ secrets.TRONGRID_API_KEY }}
+          TRONSCAN_API_KEY: ${{ secrets.TRONSCAN_API_KEY }}
