@@ -1,6 +1,7 @@
 name: CI
 
 on:
+  workflow_dispatch:
   pull_request:
   push:
     branches:
@@ -42,6 +43,30 @@ jobs:
 
       - name: Test
         run: pnpm test
+        env:
+          TRONGRID_API_KEY: ${{ secrets.TRONGRID_API_KEY }}
+          TRONSCAN_API_KEY: ${{ secrets.TRONSCAN_API_KEY }}
+
+      - name: TRON integration demo
+        if: env.TRONGRID_API_KEY != ''
+        run: npx tsx scripts/test-tron-real.ts
+        env:
+          TRONGRID_API_KEY: ${{ secrets.TRONGRID_API_KEY }}
+
+      - name: TRON multi-source comparison
+        if: env.TRONGRID_API_KEY != '' && env.TRONSCAN_API_KEY != ''
+        run: npx tsx scripts/compare-sources.ts
+        env:
+          TRONGRID_API_KEY: ${{ secrets.TRONGRID_API_KEY }}
+          TRONSCAN_API_KEY: ${{ secrets.TRONSCAN_API_KEY }}
+
+      - name: TRON full audit
+        if: env.TRONGRID_API_KEY != ''
+        run: npx tsx scripts/tron-audit.ts
+        timeout-minutes: 5
+        env:
+          TRONGRID_API_KEY: ${{ secrets.TRONGRID_API_KEY }}
+          TRONSCAN_API_KEY: ${{ secrets.TRONSCAN_API_KEY }}
 
       - name: Build
         run: pnpm build

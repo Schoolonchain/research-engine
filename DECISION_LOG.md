@@ -485,7 +485,7 @@ propuesta no se considera aprobada hasta recibir confirmación humana.
   incluida la Source asociada a Claim cuando exista.
 - Motivo: impedir que una Evidence aceptada rehabilite indirectamente un antecedente rechazado.
 
-## D-059 — Identidad administrativa federada e inyectada
+## D-067 — Identidad administrativa federada e inyectada
 
 - Fecha: 2026-07-25
 - Estado: IMPLEMENTADA; PENDIENTE DE APROBACIÓN HUMANA DE FASE 7
@@ -493,7 +493,7 @@ propuesta no se considera aprobada hasta recibir confirmación humana.
   preaprovisionados; no recibir actor, rol ni MFA desde datos controlados por el cliente.
 - Motivo: preservar una frontera de confianza explícita sin acoplar el dominio a un proveedor.
 
-## D-060 — MFA, sesión acotada y CSRF independiente
+## D-068 — MFA, sesión acotada y CSRF independiente
 
 - Fecha: 2026-07-25
 - Estado: IMPLEMENTADA; PENDIENTE DE APROBACIÓN HUMANA DE FASE 7
@@ -501,7 +501,7 @@ propuesta no se considera aprobada hasta recibir confirmación humana.
   en base y exigir CSRF para mutaciones.
 - Motivo: reducir robo de sesión, replay y ataques cross-site sobre acciones críticas.
 
-## D-061 — Separación administrativa de funciones
+## D-069 — Separación administrativa de funciones
 
 - Fecha: 2026-07-25
 - Estado: IMPLEMENTADA; PENDIENTE DE APROBACIÓN HUMANA DE FASE 7
@@ -509,10 +509,104 @@ propuesta no se considera aprobada hasta recibir confirmación humana.
   reautenticación de menos de cinco minutos y revalidación transaccional.
 - Motivo: impedir escalada horizontal y proteger la identidad inmutable de las políticas.
 
-## D-062 — Administración no equivale a Authorization de ejecución
+## D-070 — Administración no equivale a Authorization de ejecución
 
 - Fecha: 2026-07-25
 - Estado: IMPLEMENTADA; PENDIENTE DE APROBACIÓN HUMANA DE FASE 7
 - Decisión: la cola de elegibles es de solo lectura y ninguna acción de Fase 7 crea
   Authorization, ResearchJob, cola de ejecución, presupuesto o IA.
 - Motivo: mantener intacto el gate humano y técnico de la Fase 8.
+
+## D-059 — Datos blockchain en tablas propias, no en sources
+
+- Fecha: 2026-07-27
+- Estado: IMPLEMENTADA; PENDIENTE DE APROBACIÓN HUMANA
+- Decisión: los datos de blockchain se almacenan en `blockchain_blocks`, `blockchain_transactions`
+  y `blockchain_networks`, separados de las tablas de `sources`.
+- Motivo: un bloque o transacción no es una contribución de un participante; es un dato obtenido
+  activamente por el sistema. Su estructura, volumen y ciclo de vida son distintos.
+- Consecuencia: la promoción futura a Source/Evidence requerirá un mecanismo explícito.
+
+## D-060 — Conector blockchain como interfaz inyectable
+
+- Fecha: 2026-07-27
+- Estado: IMPLEMENTADA; PENDIENTE DE APROBACIÓN HUMANA
+- Decisión: definir `BlockchainConnector` como interfaz; la primera implementación usa TronGrid.
+- Motivo: permitir sustituir TronGrid por conexión directa a nodo o por otros proveedores sin
+  modificar el servicio de recolección.
+- Consecuencia: los tests usan un conector stub sin dependencia de red.
+
+## D-061 — La recolección blockchain no crea Authorization ni ResearchJob
+
+- Fecha: 2026-07-27
+- Estado: IMPLEMENTADA; PENDIENTE DE APROBACIÓN HUMANA
+- Decisión: `collectBlock` no desencadena autorización, investigación ni IA.
+- Motivo: consistencia con el principio de que ninguna acción de recolección inicia ejecución
+  costosa; la blockchain es una fuente de datos, no un trigger de investigación.
+- Consecuencia: verificado con test negativo explícito.
+
+## D-062 — Procedencia completa de cada dato blockchain
+
+- Fecha: 2026-07-27
+- Estado: IMPLEMENTADA; PENDIENTE DE APROBACIÓN HUMANA
+- Decisión: cada bloque y transacción conserva `collection_source`, `collected_at` y `raw_data`.
+  Cada recolección se registra en `data_collection_runs` con API, timestamps y contadores.
+- Motivo: trazabilidad y auditabilidad de la procedencia de los datos.
+- Consecuencia: se puede reconstruir cuándo, de dónde y cómo se obtuvo cada dato.
+
+## D-063 — Fuentes de datos blockchain como entidad independiente
+
+- Fecha: 2026-07-27
+- Estado: IMPLEMENTADA; PENDIENTE DE APROBACIÓN HUMANA
+- Decisión: crear `blockchain_data_sources` como tabla independiente con FK desde bloques y
+  transacciones. Cada observación queda vinculada a un `data_source_id` concreto. Las restricciones
+  UNIQUE incluyen `data_source_id`, permitiendo que dos fuentes registren el mismo bloque o
+  transacción de forma independiente.
+- Motivo: la arquitectura original (D-059) usaba `collection_source` como texto libre sin
+  integridad referencial, y UNIQUE(network_id, block_number) impedía que dos fuentes almacenasen
+  el mismo bloque. Esto bloqueaba la comparación multi-fuente y la auditoría cruzada.
+- Consecuencia: TronGrid y un nodo directo pueden coexistir, compararse y conservar procedencia
+  independiente. `getBlockObservations` y `getTransactionObservations` devuelven todas las
+  observaciones. Migración 0015 implementa el cambio.
+
+## D-064 — Configuración TronGrid como sección opcional del entorno
+
+- Fecha: 2026-07-27
+- Estado: IMPLEMENTADA; PENDIENTE DE APROBACIÓN HUMANA
+- Decisión: las variables `TRONGRID_API_KEY`, `TRONGRID_ENDPOINT` y `TRONGRID_TIMEOUT_MS` se
+  cargan opcionalmente en `loadEnvironment()`. Si ninguna está presente, `trongrid` es `null` y
+  las funcionalidades blockchain no están disponibles. El endpoint por defecto es
+  `https://api.trongrid.io`.
+- Motivo: no bloquear el arranque de la aplicación cuando las funcionalidades blockchain no están
+  configuradas, manteniendo las credenciales gestionadas a través del sistema existente de
+  variables de entorno.
+- Consecuencia: la clave API nunca aparece en código fuente, migraciones ni mensajes de error
+  del conector.
+
+## D-065 — API HTTP blockchain como módulo Fastify independiente
+
+- Fecha: 2026-07-27
+- Estado: IMPLEMENTADA; PENDIENTE DE APROBACIÓN HUMANA
+- Decisión: `buildBlockchainApi()` expone un subconjunto de operaciones blockchain como rutas
+  HTTP Fastify: recolección (`POST /blockchain/collect`), consulta de bloques y transacciones,
+  observaciones multi-fuente, número de bloque más reciente, red y fuentes de datos.
+- Motivo: completar el vertical slice permitiendo que los datos recolectados puedan consultarse
+  vía HTTP, siguiendo el patrón establecido por `buildProposalApi()`.
+- Consecuencia: los campos BigInt de transacciones se serializan como strings en las respuestas
+  JSON.
+
+## D-066 — TronScan como segunda fuente de datos blockchain
+
+- Fecha: 2026-07-27
+- Estado: IMPLEMENTADA; PENDIENTE DE APROBACIÓN HUMANA
+- Decisión: implementar `TronScanConnector` como segunda fuente de datos TRON, con sourceType
+  `EXPLORER`, para validar la arquitectura multi-fuente (D-063) con dos proveedores reales.
+  TronScan usa API REST con peticiones GET (vs POST de TronGrid), direcciones base58 (vs hex),
+  y una estructura de respuesta diferente.
+- Motivo: demostrar que la arquitectura soporta fuentes heterogéneas reales, no solo en teoría.
+  Dos fuentes independientes del mismo bloque permiten verificación cruzada y detección de
+  inconsistencias.
+- Consecuencia: las variables `TRONSCAN_API_KEY`, `TRONSCAN_ENDPOINT` y `TRONSCAN_TIMEOUT_MS`
+  se cargan opcionalmente igual que TronGrid. La clave API se envía en el header
+  `TRON-PRO-API-KEY`, nunca en la URL ni en mensajes de error. El script
+  `scripts/compare-sources.ts` permite comparar ambas fuentes en tiempo real.
