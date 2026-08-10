@@ -591,6 +591,81 @@ propuesta no se considera aprobada hasta recibir confirmación humana.
 - Motivo: un recálculo cambia el snapshot y `updated_at`, pero no debe reinsertar en páginas
   posteriores una Proposal que el consumidor ya recibió.
 
+## D-080 — Authorization captura un snapshot consumible
+
+- Fecha: 2026-08-06
+- Estado: IMPLEMENTADA; PENDIENTE DE APROBACIÓN HUMANA DE FASE 8
+- Decisión: emitir Authorization solo por un `VALIDATOR` reautenticado y ligarla al score run y
+  `policySetHash` vigentes; el consumo vuelve a validarlos y es único.
+- Motivo: elegibilidad no equivale a permiso y una política rotada invalida permisos pendientes.
+
+## D-081 — PAYMENT excluido estructuralmente de Fase 8
+
+- Fecha: 2026-08-06
+- Estado: IMPLEMENTADA; PENDIENTE DE APROBACIÓN HUMANA DE FASE 8
+- Decisión: aceptar únicamente `ADMIN` y `THRESHOLD` y añadir un check que rechaza `PAYMENT`.
+- Motivo: no existe aprobación para cobros, comprobantes ni proveedores de pago.
+
+## D-082 — ResearchJob único y ejecución simulada
+
+- Fecha: 2026-08-06
+- Estado: IMPLEMENTADA; PENDIENTE DE APROBACIÓN HUMANA DE FASE 8
+- Decisión: bloquear Authorization al consumir, conservar la unicidad por FK y ejecutar solo
+  un resultado determinista con proveedor nulo, coste cero y publicación falsa.
+- Motivo: probar orquestación y límites sin adelantar el Research Engine de Fase 9.
+
+## D-083 — Cola acotada por lease, presupuesto y deadline
+
+- Fecha: 2026-08-06
+- Estado: IMPLEMENTADA; PENDIENTE DE APROBACIÓN HUMANA DE FASE 8
+- Decisión: reclamar con `SKIP LOCKED`, recuperar leases vencidos y validar atómicamente
+  intentos, deadlines, cancelación, llamadas, unidades y coste.
+- Motivo: ningún worker puede completar fuera de su lease o superar límites autorizados.
+
+## D-084 — Cambio de política invalida cursores y consumidores
+
+- Fecha: 2026-08-06
+- Estado: IMPLEMENTADA; PENDIENTE DE APROBACIÓN HUMANA DE FASE 8
+- Decisión: incluir `policySetHash` en cursores y Authorization; responder conflicto si la
+  activación global ya no coincide.
+- Motivo: impedir traversals o ejecuciones que mezclen decisiones de políticas diferentes.
+
+## D-085 — Excepción ADMIN y cierre transaccional de intentos
+
+- Fecha: 2026-08-07
+- Estado: IMPLEMENTADA; PENDIENTE DE REAUDITORÍA DE FASE 8
+- Decisión: una Authorization `ADMIN` puede omitir únicamente la elegibilidad vigente si registra
+  actor, justificación restringida, snapshot observado y política activa. `THRESHOLD` continúa
+  ligada al snapshot elegible. Cada intento conserva consumo y toda transición terminal genera
+  evento y Outbox; lease y deadline se evalúan con reloj de base de datos después del bloqueo.
+- Motivo: aplicar la decisión humana sin convertir la excepción administrativa en un bypass de
+  autoridad, presupuestos, vigencia, consumo único, idempotencia o auditoría.
+- Consecuencia: respuestas tardías, carreras de cancelación, fallos y outputs fuera del simulador
+  determinista quedan cerrados sin incorporar IA, proveedores, PAYMENT o publicación.
+
+## D-086 — Generación de lease y consumo observable exactamente una vez
+
+- Fecha: 2026-08-10
+- Estado: IMPLEMENTADA; PENDIENTE DE REAUDITORÍA DE FASE 8
+- Decisión: cada claim genera un token UUID nuevo y lo exige junto con el worker en toda respuesta;
+  el vencimiento nunca supera el deadline. Consumir una Authorization emite exactamente una vez
+  `authorization_consumed` y su Outbox en la transacción que crea el único ResearchJob.
+- Motivo: `workerId` identifica al ejecutor, pero no distingue intentos sucesivos; el consumo sin
+  evento impedía reconstruir completamente la transición autorizada.
+- Consecuencia: una respuesta de una generación anterior no puede cerrar un intento posterior,
+  incluso con el mismo worker. Las guardas SQL e idempotencia por actor refuerzan el mismo límite.
+
+## D-087 — Presupuesto restante y terminales congelados
+
+- Fecha: 2026-08-10
+- Estado: IMPLEMENTADA; PENDIENTE DE REAUDITORÍA DIRIGIDA DE FASE 8
+- Decisión: `fail()` exige siempre el consumo del intento y cada lease publica presupuesto
+  restante acumulado. Una Authorization terminal no admite ninguna mutación posterior, incluidos
+  motivo y timestamps. La respuesta de auditoría mantiene los IDs originales.
+- Motivo: impedir reintentos con una visión obsoleta del presupuesto y evitar la reescritura de
+  evidencia temporal o causal después de consumir, revocar, expirar o rechazar un permiso.
+- Consecuencia: un fallo reduce explícitamente el presupuesto que recibe el siguiente intento.
+
 ## D-059 — Datos blockchain en tablas propias, no en sources
 
 - Fecha: 2026-07-27

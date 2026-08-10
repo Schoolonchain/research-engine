@@ -341,6 +341,21 @@ Además: expiración, revocación, doble envío, carreras, cancelación y presup
 
 El guard de autorización es demostrable y ningún camino alternativo crea ejecución.
 
+### Resultado implementado
+
+- Authorization explícita `ADMIN`/`THRESHOLD`, vigente, revocable e idempotente.
+- Captura inmutable de score run y `policySetHash`; PAYMENT rechazado estructuralmente.
+- Consumo transaccional único y un ResearchJob máximo por Authorization.
+- Cola con leases, recuperación, deadlines, cancelación y reintentos acotados.
+- Presupuestos comprobados atómicamente bajo lease.
+- Ejecutor determinista de coste cero, sin proveedor ni publicación.
+- Cursores y consumidores rechazan cambios de política global.
+- IA real, PAYMENT, Research Engine y publicación permanecen fuera.
+
+### Gate
+
+Orden explícita requerida: **“Fase 8 aprobada. Integra la PR y comienza con la Fase 9.”**
+
 ## Fase 9 — Research Engine
 
 ### Objetivo

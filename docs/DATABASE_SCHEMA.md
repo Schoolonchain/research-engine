@@ -23,6 +23,7 @@ Fuentes ejecutables:
 - `migrations/0019_onchain_metrics.sql`
 - `migrations/0020_administrative_security.sql`
 - `migrations/0021_administrative_integrity.sql`
+- `migrations/0022_phase8_authorizations_jobs.sql`
 
 ## Agregados principales
 
