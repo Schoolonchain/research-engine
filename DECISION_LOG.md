@@ -655,6 +655,17 @@ propuesta no se considera aprobada hasta recibir confirmación humana.
 - Consecuencia: una respuesta de una generación anterior no puede cerrar un intento posterior,
   incluso con el mismo worker. Las guardas SQL e idempotencia por actor refuerzan el mismo límite.
 
+## D-087 — Presupuesto restante y terminales congelados
+
+- Fecha: 2026-08-10
+- Estado: IMPLEMENTADA; PENDIENTE DE REAUDITORÍA DIRIGIDA DE FASE 8
+- Decisión: `fail()` exige siempre el consumo del intento y cada lease publica presupuesto
+  restante acumulado. Una Authorization terminal no admite ninguna mutación posterior, incluidos
+  motivo y timestamps. La respuesta de auditoría mantiene los IDs originales.
+- Motivo: impedir reintentos con una visión obsoleta del presupuesto y evitar la reescritura de
+  evidencia temporal o causal después de consumir, revocar, expirar o rechazar un permiso.
+- Consecuencia: un fallo reduce explícitamente el presupuesto que recibe el siguiente intento.
+
 ## D-059 — Datos blockchain en tablas propias, no en sources
 
 - Fecha: 2026-07-27

@@ -37,7 +37,8 @@ reintentos devuelven ese mismo job. Una rotación de política obliga a emitir o
 ## Cola, leases y límites
 
 Los jobs nacen `QUEUED`. El claim usa `FOR UPDATE SKIP LOCKED`, recupera leases vencidos,
-incrementa intentos y aplica `maxAttempts`, `availableAt` y `deadlineAt`. Solo el propietario
+incrementa intentos y aplica `maxAttempts`, `availableAt` y `deadlineAt`. Cada lease expone el
+presupuesto restante acumulado de llamadas, unidades y coste. Solo el propietario
 de un lease vigente puede completar o declarar fallo. Cada claim genera un `leaseToken` UUID
 nuevo, también si el mismo `workerId` recupera otro intento; `complete` y `fail` exigen ambos.
 `leaseExpiresAt` siempre es el mínimo entre la duración pedida y el deadline del job.
@@ -45,7 +46,8 @@ nuevo, también si el mismo `workerId` recupera otro intento; `complete` y `fail
 La finalización y el fallo bloquean la fila y usan `clock_timestamp()` después del bloqueo para
 rechazar respuestas tardías, leases vencidos y deadlines cruzados durante la ejecución. Comprueban
 atómicamente llamadas, unidades de trabajo y coste. Cada intento, también fallido o cancelado,
-registra su consumo en un ledger append-only. Un exceso no completa el job. Los reintentos admiten retrasos de 1–300
+registra su consumo obligatorio en un ledger append-only; `fail()` no admite omitir `usage`.
+Un exceso no completa el job. Los reintentos admiten retrasos de 1–300
 segundos y un máximo de diez intentos. Al agotarlos, el job queda `FAILED`.
 
 La cancelación de jobs en cola es inmediata. En ejecución tiene precedencia sobre `complete` y
@@ -64,6 +66,7 @@ inválidos. No accede a red, modelos, prompts, PAYMENT o Knowledge Hub.
 Triggers de base de datos bloquean borrados, cambios de grants, reducción de contadores,
 transiciones inválidas, modificación de terminales y alteración del ledger de intentos. Estas
 reglas complementan las comprobaciones del servicio y preservan historia e invariantes ante SQL directo.
+En Authorizations terminales la fila completa queda congelada, incluidos motivo y timestamps.
 
 ## Consistencia de política en consumidores
 

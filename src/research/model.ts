@@ -40,4 +40,7 @@ export interface ResearchJobLease extends ResearchJobView {
   readonly maxCalls: number;
   readonly maxTokens: number;
   readonly maxCostMinor: number;
+  readonly remainingCalls: number;
+  readonly remainingTokens: number;
+  readonly remainingCostMinor: number;
 }

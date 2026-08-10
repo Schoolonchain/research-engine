@@ -189,7 +189,10 @@ export class ResearchJobService {
       if (!row) return null;
       return Object.freeze({ ...jobView(row), leaseOwner: row.lease_owner!,
         leaseToken: row.lease_token!, leaseExpiresAt: row.lease_expires_at!, maxCalls: row.max_calls,
-        maxTokens: Number(row.max_tokens), maxCostMinor: Number(row.max_cost_minor) });
+        maxTokens: Number(row.max_tokens), maxCostMinor: Number(row.max_cost_minor),
+        remainingCalls: row.max_calls - row.calls_used,
+        remainingTokens: Number(row.max_tokens) - Number(row.tokens_used),
+        remainingCostMinor: Number(row.max_cost_minor) - Number(row.spent_cost_minor) });
     });
   }
 
@@ -226,7 +229,7 @@ export class ResearchJobService {
   }
 
   public async fail(jobPublicId: string, workerId: string, leaseToken: string, errorCode: string,
-    retryDelaySeconds: number, usage: Usage = { calls: 0, tokens: 0, costMinor: 0 }): Promise<void> {
+    retryDelaySeconds: number, usage: Usage): Promise<void> {
     validateUsage(usage);
     if (!/^[A-Z][A-Z0-9_]{0,99}$/.test(errorCode) || !Number.isSafeInteger(retryDelaySeconds) || retryDelaySeconds < 1 || retryDelaySeconds > 300) throw new ResearchValidationError("Invalid failure");
     await this.database.transaction(async (tx) => {

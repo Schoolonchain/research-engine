@@ -82,16 +82,35 @@ BEGIN
     OR NEW.max_duration_seconds <> OLD.max_duration_seconds
     OR NEW.max_calls <> OLD.max_calls OR NEW.max_tokens <> OLD.max_tokens
     OR NEW.valid_from <> OLD.valid_from OR NEW.expires_at <> OLD.expires_at
+    OR NEW.created_at <> OLD.created_at
     OR NEW.eligibility_score_run_id IS DISTINCT FROM OLD.eligibility_score_run_id
     OR NEW.policy_set_hash <> OLD.policy_set_hash
     OR NEW.admin_justification IS DISTINCT FROM OLD.admin_justification THEN
     RAISE EXCEPTION 'authorization grant is immutable';
   END IF;
+  IF NEW.revocation_reason IS DISTINCT FROM OLD.revocation_reason AND NEW.status <> 'REVOKED' THEN
+    RAISE EXCEPTION 'revocation reason is only set by revocation';
+  END IF;
+  IF NEW.revoked_at IS DISTINCT FROM OLD.revoked_at AND NEW.status <> 'REVOKED' THEN
+    RAISE EXCEPTION 'revocation timestamp is only set by revocation';
+  END IF;
+  IF NEW.consumed_at IS DISTINCT FROM OLD.consumed_at AND NEW.status <> 'CONSUMED' THEN
+    RAISE EXCEPTION 'consumption timestamp is only set by consumption';
+  END IF;
   IF OLD.status = 'VALID' AND NEW.status NOT IN ('VALID','CONSUMED','REVOKED','EXPIRED') THEN
     RAISE EXCEPTION 'invalid authorization transition';
   END IF;
-  IF OLD.status IN ('CONSUMED','REVOKED','EXPIRED','REJECTED') AND NEW.status <> OLD.status THEN
-    RAISE EXCEPTION 'terminal authorization is immutable';
+  IF OLD.status IN ('CONSUMED','REVOKED','EXPIRED','REJECTED') THEN
+    RAISE EXCEPTION 'terminal authorization, reason and timestamps are immutable';
+  END IF;
+  IF NEW.status = 'REVOKED' AND (NEW.revoked_at IS NULL OR NEW.revocation_reason IS NULL) THEN
+    RAISE EXCEPTION 'revoked authorization requires immutable reason and timestamp';
+  END IF;
+  IF NEW.status = 'CONSUMED' AND NEW.consumed_at IS NULL THEN
+    RAISE EXCEPTION 'consumed authorization requires immutable timestamp';
+  END IF;
+  IF NEW.status = 'EXPIRED' AND OLD.expires_at > clock_timestamp() THEN
+    RAISE EXCEPTION 'authorization cannot expire before its deadline';
   END IF;
   RETURN NEW;
 END;

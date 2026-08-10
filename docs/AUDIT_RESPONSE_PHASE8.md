@@ -20,12 +20,23 @@ La PR #16 permanece Draft. No se integra y no inicia la Fase 9.
   un token de un intento anterior falla aunque el mismo worker reclame el siguiente.
 - **H-005:** el consumo crea `authorization_consumed` y Outbox exactamente una vez, atómicamente
   con el ResearchJob y `research_job_created`.
-- **M-003:** `leaseExpiresAt` queda acotado estructuralmente y en el claim por `deadlineAt`.
-- **M-005:** grants, historia y estados terminales de Authorization quedan protegidos ante SQL.
-- **M-006:** ResearchJob, contadores, transiciones terminales y ledger de intentos quedan
-  protegidos ante SQL directo.
-- **M-007:** la idempotencia de emisión se acota por actor; dos actores que compiten con el mismo
+- **M-003:** grants, historia, motivo y todos los timestamps de una Authorization terminal quedan
+  congelados ante cualquier `UPDATE` o `DELETE`.
+- **M-005:** la idempotencia de emisión se acota por actor; dos actores que compiten con el mismo
   texto de clave reciben Authorizations independientes, sin colisión ni filtración cruzada.
+- **M-006:** esta respuesta conserva los identificadores originales de auditoría; no reasigna el
+  ID de un hallazgo a otra corrección.
+- **M-007:** `leaseExpiresAt` queda acotado estructuralmente y en el claim por `deadlineAt`.
+
+## Tercera ronda dirigida
+
+- **H-004:** `usage` es obligatorio en `fail()` y cada lease entrega `remainingCalls`,
+  `remainingTokens` y `remainingCostMinor`, calculados desde el consumo acumulado. La prueba de
+  dos intentos demuestra que el fallo del primero reduce el presupuesto visible del segundo.
+- **M-003:** cerrado completamente mediante inmutabilidad total de filas terminales; motivo,
+  `consumed_at`, `revoked_at`, `created_at`, `updated_at`, vigencia y grant no pueden reescribirse.
+- **M-006:** cerrado documentalmente manteniendo H-001, H-004, H-005, M-003, M-005, M-006 y
+  M-007 asociados a sus hallazgos originales.
 
 ## MEDIUM
 

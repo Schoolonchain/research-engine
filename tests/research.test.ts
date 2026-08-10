@@ -177,15 +177,18 @@ describe("Phase 8 authorization and deterministic research jobs", () => {
     await jobs.cancel(cancelJob.publicId);
     expect((await raw.query<{ status: string }>("SELECT status FROM research_jobs WHERE public_id = $1", [cancelJob.publicId])).rows[0]!.status).toBe("CANCELLED");
 
-    await jobs.fail(budgetJob.publicId, "budget-worker", budgetLease!.leaseToken, "SIMULATED_FAILURE", 1);
+    await jobs.fail(budgetJob.publicId, "budget-worker", budgetLease!.leaseToken,
+      "SIMULATED_FAILURE", 1, { calls: 0, tokens: 0, costMinor: 0 });
     await raw.query("UPDATE research_jobs SET available_at = CURRENT_TIMESTAMP WHERE public_id = $1", [budgetJob.publicId]);
     const retryLease = await jobs.claim("retry-worker", 30);
     expect(retryLease?.attempts).toBe(2);
-    await jobs.fail(budgetJob.publicId, "retry-worker", retryLease!.leaseToken, "SIMULATED_FAILURE", 1);
+    await jobs.fail(budgetJob.publicId, "retry-worker", retryLease!.leaseToken,
+      "SIMULATED_FAILURE", 1, { calls: 0, tokens: 0, costMinor: 0 });
     await raw.query("UPDATE research_jobs SET available_at = CURRENT_TIMESTAMP WHERE public_id = $1", [budgetJob.publicId]);
     const finalLease = await jobs.claim("final-worker", 30);
     expect(finalLease?.attempts).toBe(3);
-    await jobs.fail(budgetJob.publicId, "final-worker", finalLease!.leaseToken, "SIMULATED_FAILURE", 1);
+    await jobs.fail(budgetJob.publicId, "final-worker", finalLease!.leaseToken,
+      "SIMULATED_FAILURE", 1, { calls: 0, tokens: 0, costMinor: 0 });
     expect((await raw.query<{ status: string }>("SELECT status FROM research_jobs WHERE public_id = $1", [budgetJob.publicId])).rows[0]!.status).toBe("FAILED");
   });
 
@@ -275,18 +278,25 @@ describe("Phase 8 authorization and deterministic research jobs", () => {
     const validator = await context("VALIDATOR", "validator-failed-usage");
     const jobs = new ResearchJobService(database);
     const permit = await issue(validator, await eligible(policyAdmin, "failed-usage"), "failed-usage",
-      { maxCalls: 2, maxTokens: 10, maxAttempts: 2 });
+      { maxCalls: 2, maxTokens: 10, maxCostMinor: 5, maxAttempts: 2 });
     const job = await jobs.createFromAuthorization(permit.publicId);
     const usageOne = await jobs.claim("usage-one", 30);
+    expect(usageOne).toMatchObject({ remainingCalls: 2, remainingTokens: 10,
+      remainingCostMinor: 5 });
     await jobs.fail(job.publicId, "usage-one", usageOne!.leaseToken, "FIRST_FAILURE", 1,
-      { calls: 1, tokens: 4, costMinor: 0 });
+      { calls: 1, tokens: 4, costMinor: 2 });
     await raw.query(`UPDATE research_jobs SET available_at=clock_timestamp() WHERE public_id=$1`, [job.publicId]);
     const usageTwo = await jobs.claim("usage-two", 30);
+    expect(usageTwo).toMatchObject({ remainingCalls: 1, remainingTokens: 6,
+      remainingCostMinor: 3 });
     await jobs.fail(job.publicId, "usage-two", usageTwo!.leaseToken, "FINAL_FAILURE", 1,
-      { calls: 1, tokens: 6, costMinor: 0 });
-    const result = await raw.query<{ status: string; calls_used: number; tokens_used: string; attempts: number }>(
-      `SELECT status,calls_used,tokens_used,attempts FROM research_jobs WHERE public_id=$1`, [job.publicId]);
-    expect(result.rows[0]).toEqual({ status: "FAILED", calls_used: 2, tokens_used: 10, attempts: 2 });
+      { calls: 1, tokens: 6, costMinor: 3 });
+    const result = await raw.query<{ status: string; calls_used: number; tokens_used: string;
+      spent_cost_minor: string; attempts: number }>(
+      `SELECT status,calls_used,tokens_used,spent_cost_minor,attempts
+       FROM research_jobs WHERE public_id=$1`, [job.publicId]);
+    expect(result.rows[0]).toEqual({ status: "FAILED", calls_used: 2, tokens_used: 10,
+      spent_cost_minor: 5, attempts: 2 });
     expect((await raw.query<{ count: number }>(`SELECT count(*)::int AS count FROM research_job_attempt_usage
       WHERE research_job_id=(SELECT id FROM research_jobs WHERE public_id=$1)`, [job.publicId])).rows[0]!.count).toBe(2);
   });
@@ -347,6 +357,12 @@ describe("Phase 8 authorization and deterministic research jobs", () => {
       WHERE event_type='authorization_revoked' AND aggregate_id=(SELECT id FROM authorizations WHERE public_id=$1)`,
     [permit.publicId]);
     expect(count.rows[0]!.count).toBe(1);
+    await expect(raw.query(`UPDATE authorizations SET revocation_reason='Changed reason'
+      WHERE public_id=$1`, [permit.publicId])).rejects.toThrow();
+    await expect(raw.query(`UPDATE authorizations SET revoked_at=revoked_at+INTERVAL '1 second'
+      WHERE public_id=$1`, [permit.publicId])).rejects.toThrow();
+    await expect(raw.query(`UPDATE authorizations SET updated_at=updated_at+INTERVAL '1 second'
+      WHERE public_id=$1`, [permit.publicId])).rejects.toThrow();
   });
 
   it("allows only a justified ADMIN exception while THRESHOLD remains current-eligibility bound", async () => {
@@ -426,6 +442,8 @@ describe("Phase 8 authorization and deterministic research jobs", () => {
       [permit.publicId])).rejects.toThrow();
     await expect(raw.query(`UPDATE authorizations SET status='VALID' WHERE public_id=$1`,
       [permit.publicId])).rejects.toThrow();
+    await expect(raw.query(`UPDATE authorizations SET consumed_at=consumed_at+INTERVAL '1 second'
+      WHERE public_id=$1`, [permit.publicId])).rejects.toThrow();
     await expect(raw.query(`DELETE FROM authorizations WHERE public_id=$1`, [permit.publicId])).rejects.toThrow();
     await expect(raw.query(`UPDATE research_jobs SET max_calls=max_calls+1 WHERE public_id=$1`,
       [job.publicId])).rejects.toThrow();
