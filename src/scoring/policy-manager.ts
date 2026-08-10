@@ -3,6 +3,12 @@ import { createHash } from "node:crypto";
 import type { TransactionalDatabase } from "../db/database.js";
 import { EventStore } from "../events/event-store.js";
 import { randomUUID } from "node:crypto";
+import type { AdministrativeContext } from "../admin/model.js";
+import {
+  AdministrativeConflictError,
+  AdministrativeValidationError,
+} from "../admin/errors.js";
+import { assertAdministrativeAuthority } from "../admin/authority.js";
 import type { ScorePolicyConfig } from "./model.js";
 
 const DIMENSIONS = ["PRIORITY", "PROGRESS", "CONFIDENCE", "SUPPORT_COUNT"] as const;
@@ -66,9 +72,37 @@ export class ScorePolicyManager {
     this.events = new EventStore(database);
   }
 
-  public async activate(policy: ScorePolicyConfig): Promise<void> {
+  public async activate(
+    authority: AdministrativeContext,
+    policy: ScorePolicyConfig,
+    mutationKey: string,
+  ): Promise<void> {
     validateScorePolicy(policy);
+    const key = mutationKey.trim().normalize("NFC");
+    if (key.length < 8 || key.length > 200) {
+      throw new AdministrativeValidationError("Invalid idempotency key");
+    }
+    const activationRequestHash = createHash("sha256")
+      .update(canonical(policy)).digest("hex");
     await this.database.transaction(async (tx) => {
+      await assertAdministrativeAuthority(tx, authority, ["POLICY_ADMIN"], true);
+      const existingReceipt = await tx.query<{ request_hash: string }>(
+        `SELECT request_hash FROM administrative_mutation_receipts
+         WHERE identity_id = $1 AND operation = 'activate_score_policy'
+           AND idempotency_key = $2`,
+        [authority.identityId, key],
+      );
+      if (existingReceipt.rows[0]) {
+        if (existingReceipt.rows[0].request_hash !== activationRequestHash) {
+          throw new AdministrativeConflictError(
+            "Idempotency key was used for another policy",
+          );
+        }
+        return;
+      }
+      await tx.query(
+        "SELECT name FROM administrative_locks WHERE name = 'policy_activation' FOR UPDATE",
+      );
       const fingerprints: Array<{ dimension: string; fingerprint: string }> = [];
       for (const dimension of DIMENSIONS) {
         const definition = { formula: FORMULAS[dimension] };
@@ -96,8 +130,15 @@ export class ScorePolicyManager {
       }
       const policySetHash = scorePolicySetFingerprint(fingerprints);
       const previous = await tx.query<{ version: number }>(
-        "SELECT DISTINCT version FROM score_policies WHERE status = 'ACTIVE'",
+        `SELECT DISTINCT version FROM score_policies WHERE status = 'ACTIVE'
+         ORDER BY version`,
       );
+      if (previous.rows.length > 1) {
+        throw new Error("Active score policy versions are inconsistent");
+      }
+      if (previous.rows[0]?.version === policy.version) {
+        throw new AdministrativeConflictError("Score policy version is already active");
+      }
       await tx.query(
         "UPDATE score_policies SET status = 'RETIRED' WHERE status = 'ACTIVE'",
       );
@@ -113,6 +154,25 @@ export class ScorePolicyManager {
         ) VALUES ($1,$2,$3,$4)`,
         [policy.version, previous.rows[0]?.version ?? null, correlationId, policySetHash],
       );
+      await tx.query(
+        `INSERT INTO administrative_action_audit (
+          actor_id, session_id, action, target_type, target_id,
+          correlation_id, details
+        ) VALUES ($1,$2,'score_policy_activated','SCORE_POLICY_ACTIVATION',
+          $3,$3,$4::jsonb)`,
+        [authority.actorId, authority.sessionId, correlationId,
+          JSON.stringify({
+            policyVersion: policy.version,
+            previousPolicyVersion: previous.rows[0]?.version ?? null,
+            policySetHash,
+          })],
+      );
+      await tx.query(
+        `INSERT INTO administrative_mutation_receipts (
+          identity_id, operation, idempotency_key, request_hash, correlation_id
+        ) VALUES ($1,'activate_score_policy',$2,$3,$4)`,
+        [authority.identityId, key, activationRequestHash, correlationId],
+      );
       await this.events.appendMany(tx, [{
         eventId: randomUUID(),
         eventType: "score_policy_activated",
@@ -120,7 +180,7 @@ export class ScorePolicyManager {
         aggregateType: "score_policy_activation",
         aggregateId: correlationId,
         expectedSequence: 0,
-        actor: { type: "system" },
+        actor: { type: "policy_admin", id: authority.actorId },
         correlationId,
         payload: {
           policyVersion: policy.version,

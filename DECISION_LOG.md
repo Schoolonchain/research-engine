@@ -485,6 +485,112 @@ propuesta no se considera aprobada hasta recibir confirmación humana.
   incluida la Source asociada a Claim cuando exista.
 - Motivo: impedir que una Evidence aceptada rehabilite indirectamente un antecedente rechazado.
 
+## D-067 — Identidad administrativa federada e inyectada
+
+- Fecha: 2026-07-25
+- Estado: IMPLEMENTADA; PENDIENTE DE APROBACIÓN HUMANA DE FASE 7
+- Decisión: aceptar solo principals verificados por un adaptador IdP inyectado y
+  preaprovisionados; no recibir actor, rol ni MFA desde datos controlados por el cliente.
+- Motivo: preservar una frontera de confianza explícita sin acoplar el dominio a un proveedor.
+
+## D-068 — MFA, sesión acotada y CSRF independiente
+
+- Fecha: 2026-07-25
+- Estado: IMPLEMENTADA; PENDIENTE DE APROBACIÓN HUMANA DE FASE 7
+- Decisión: exigir MFA, persistir únicamente hashes de tokens, comprobar expiración/revocación
+  en base y exigir CSRF para mutaciones.
+- Motivo: reducir robo de sesión, replay y ataques cross-site sobre acciones críticas.
+
+## D-069 — Separación administrativa de funciones
+
+- Fecha: 2026-07-25
+- Estado: IMPLEMENTADA; PENDIENTE DE APROBACIÓN HUMANA DE FASE 7
+- Decisión: separar `MODERATOR`, `POLICY_ADMIN` y `VALIDATOR`; la activación exige además
+  reautenticación de menos de cinco minutos y revalidación transaccional.
+- Motivo: impedir escalada horizontal y proteger la identidad inmutable de las políticas.
+
+## D-070 — Administración no equivale a Authorization de ejecución
+
+- Fecha: 2026-07-25
+- Estado: IMPLEMENTADA; PENDIENTE DE APROBACIÓN HUMANA DE FASE 7
+- Decisión: la cola de elegibles es de solo lectura y ninguna acción de Fase 7 crea
+  Authorization, ResearchJob, cola de ejecución, presupuesto o IA.
+- Motivo: mantener intacto el gate humano y técnico de la Fase 8.
+
+## D-071 — Autoridad administrativa revalidada transaccionalmente
+
+- Fecha: 2026-08-06
+- Estado: CORRECCIÓN DE AUDITORÍA; PENDIENTE DE APROBACIÓN HUMANA DE FASE 7
+- Decisión: moderate, listEligible y activación bloquean y revalidan sesión, identidad, rol,
+  MFA, vigencia y revocación dentro de su propia transacción.
+- Motivo: un contexto autenticado previamente no conserva autoridad después de un cambio.
+
+## D-072 — Elegibilidad ligada a snapshot vigente
+
+- Fecha: 2026-08-06
+- Estado: CORRECCIÓN DE AUDITORÍA; PENDIENTE DE APROBACIÓN HUMANA DE FASE 7
+- Decisión: ligar la cola a scoreRunId, policySetHash y knowledgeRevision; una activación
+  invalida lógicamente por hash global sin actualizar Proposals masivamente y el siguiente
+  recálculo renueva el snapshot individual.
+- Motivo: impedir revisión humana basada en conocimiento o políticas obsoletos.
+
+## D-073 — Motivo restringido y semántica reasonProvided
+
+- Fecha: 2026-08-06
+- Estado: CORRECCIÓN DE AUDITORÍA; PENDIENTE DE APROBACIÓN HUMANA DE FASE 7
+- Decisión: persistir el motivo solo en auditoría administrativa restringida y publicar en el
+  evento únicamente `reasonProvided: true`.
+- Motivo: conservar responsabilidad sin copiar texto administrativo al Event Log duradero.
+
+## D-074 — Mutaciones administrativas idempotentes
+
+- Fecha: 2026-08-06
+- Estado: CORRECCIÓN DE AUDITORÍA; PENDIENTE DE APROBACIÓN HUMANA DE FASE 7
+- Decisión: exigir claves idempotentes y recibos append-only para moderación, activación y
+  revocación de sesiones; serializar revocaciones concurrentes antes de leer el recibo.
+- Motivo: reintentos no deben duplicar transiciones, auditoría ni eventos.
+
+## D-075 — Activación global serializada
+
+- Fecha: 2026-08-06
+- Estado: CORRECCIÓN DE AUDITORÍA; PENDIENTE DE APROBACIÓN HUMANA DE FASE 7
+- Decisión: serializar activaciones mediante un lock persistente y numerarlas secuencialmente.
+- Motivo: previous_policy_version debe formar una cadena total incluso con administradores concurrentes.
+
+## D-076 — Identidad administrada exclusivamente en la frontera IdP
+
+- Fecha: 2026-08-06
+- Estado: CORRECCIÓN DE AUDITORÍA; PENDIENTE DE APROBACIÓN HUMANA DE FASE 7
+- Decisión: retirar `changeIdentity()` y su endpoint; Fase 7 solo consume identidades
+  preaprovisionadas y cambios de estado o rol realizados por la frontera IdP.
+- Motivo: `POLICY_ADMIN` no debe adquirir implícitamente autoridad sobre identidades. Un
+  futuro control interno exigiría aprobación y el diseño separado de `IDENTITY_ADMIN`.
+
+## D-077 — Límite de sesiones serializado por identidad
+
+- Fecha: 2026-08-06
+- Estado: CORRECCIÓN DE AUDITORÍA; PENDIENTE DE APROBACIÓN HUMANA DE FASE 7
+- Decisión: bloquear la fila de identidad antes de contar, revocar exceso e insertar sesión.
+- Motivo: el máximo de diez sesiones activas debe mantenerse también con emisiones concurrentes.
+
+## D-078 — Guard único y representación pública de elegibilidad
+
+- Fecha: 2026-08-06
+- Estado: CORRECCIÓN DE AUDITORÍA; PENDIENTE DE APROBACIÓN HUMANA DE FASE 7
+- Decisión: centralizar la vigencia en la vista `current_proposal_eligibility`; la cola y las
+  lecturas públicas consumen el mismo guard. La API conserva `status: ELIGIBLE` y expone
+  `eligibilitySnapshotCurrent: false` cuando el snapshot está obsoleto.
+- Motivo: ningún consumidor debe interpretar como vigente un snapshot rechazado por otro.
+
+## D-079 — Cursor e índice con una misma clave total
+
+- Fecha: 2026-08-06
+- Estado: CORRECCIÓN DE AUDITORÍA; PENDIENTE DE APROBACIÓN HUMANA DE FASE 7
+- Decisión: avanzar por `proposal.public_id`, indexarlo y vincular cada cursor al `scoreRunId`
+  inmutable del snapshot entregado, cuya pertenencia se valida al continuar.
+- Motivo: un recálculo cambia el snapshot y `updated_at`, pero no debe reinsertar en páginas
+  posteriores una Proposal que el consumidor ya recibió.
+
 ## D-059 — Datos blockchain en tablas propias, no en sources
 
 - Fecha: 2026-07-27

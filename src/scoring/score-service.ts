@@ -4,7 +4,11 @@ import type { AppendEventCommand } from "../events/event-store.js";
 import { EventStore } from "../events/event-store.js";
 import type { TransactionalDatabase } from "../db/database.js";
 import type { ScoreDimension, ScorePolicyConfig, ScoreResult } from "./model.js";
-import { scorePolicyFingerprint, validateScorePolicy } from "./policy-manager.js";
+import {
+  scorePolicyFingerprint,
+  scorePolicySetFingerprint,
+  validateScorePolicy,
+} from "./policy-manager.js";
 
 interface ActivePolicyRow {
   readonly dimension: ScoreDimension["dimension"];
@@ -19,6 +23,7 @@ interface InputsRow {
   readonly status: string;
   readonly version: number;
   readonly support_count: string;
+  readonly knowledge_revision: string;
   readonly sources: number;
   readonly claims: number;
   readonly evidence: number;
@@ -62,6 +67,9 @@ export class ScoreService {
   public async recalculate(proposalPublicId: string): Promise<ScoreResult> {
     const runId = randomUUID();
     return this.database.transaction(async (outer) => {
+      await outer.query(
+        "SELECT name FROM administrative_locks WHERE name = 'policy_activation' FOR SHARE",
+      );
       const policies = await outer.query<ActivePolicyRow>(
         `SELECT dimension, version, definition, eligibility_definition, definition_hash
          FROM score_policies WHERE status = 'ACTIVE' ORDER BY dimension`,
@@ -83,9 +91,13 @@ export class ScoreService {
           throw new Error(`Score policy ${active.dimension} fingerprint mismatch`);
         }
       }
+      const policySetHash = scorePolicySetFingerprint(policies.rows.map((active) => ({
+        dimension: active.dimension,
+        fingerprint: active.definition_hash,
+      })));
 
       const proposalResult = await outer.query<Omit<InputsRow, keyof CountsRow>>(
-        `SELECT id, public_id, status, version, support_count
+        `SELECT id, public_id, status, version, support_count, knowledge_revision
          FROM proposals WHERE public_id = $1 AND status <> 'DELETED' FOR UPDATE`,
         [proposalPublicId],
       );
@@ -218,8 +230,9 @@ export class ScoreService {
 
       await outer.query(
           `INSERT INTO score_runs (
-            id, proposal_id, policy_version, inputs, dimensions, eligible
-          ) VALUES ($1,$2,$3,$4::jsonb,$5::jsonb,$6)`,
+            id, proposal_id, policy_version, inputs, dimensions, eligible,
+            policy_set_hash, knowledge_revision
+          ) VALUES ($1,$2,$3,$4::jsonb,$5::jsonb,$6,$7,$8)`,
           [
             runId, row.id, policy.version,
             JSON.stringify({
@@ -228,7 +241,7 @@ export class ScoreService {
               acceptedContradictions: row.contradictions,
             }),
             JSON.stringify(Object.fromEntries(dimensions.map((item) => [item.dimension, item.value]))),
-            eligible,
+            eligible, policySetHash, row.knowledge_revision,
           ],
           );
       for (const dimension of dimensions) {
@@ -250,9 +263,13 @@ export class ScoreService {
         const updated = await outer.query(
           `UPDATE proposals SET status = $1, version = version + $2,
             priority_score = $3, priority_score_policy_version = $4,
+            eligibility_score_run_id = CASE WHEN $8 THEN $9::uuid ELSE NULL::uuid END,
+            eligibility_policy_set_hash = CASE WHEN $8 THEN $10::char(64) ELSE NULL::char(64) END,
+            eligibility_knowledge_revision = CASE WHEN $8 THEN knowledge_revision ELSE NULL END,
             updated_at = CURRENT_TIMESTAMP
            WHERE id = $5 AND version = $6 AND status = $7`,
-          [nextStatus, versionDelta, values["PRIORITY"], policy.version, row.id, row.version, row.status],
+          [nextStatus, versionDelta, values["PRIORITY"], policy.version,
+            row.id, row.version, row.status, eligible, runId, policySetHash],
         );
       if (updated.rowCount !== 1) throw new Error("Proposal changed during scoring");
       await this.events.appendMany(outer, commands);

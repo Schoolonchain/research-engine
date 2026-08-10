@@ -20,6 +20,7 @@ export interface Proposal {
   readonly centralQuestion: string;
   readonly description: string;
   readonly status: string;
+  readonly eligibilitySnapshotCurrent: boolean;
   readonly visibility: ProposalVisibility;
   readonly statusReason: string | null;
   readonly supportCount: number;
