@@ -11,3 +11,4 @@ Thumbs.db
 
 # Copia local de producción usada solo para inspección en Fase 0.
 knowledg_hub-public-reference/
+.claude/
