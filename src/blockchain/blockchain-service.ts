@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import type { DatabaseExecutor, TransactionalDatabase } from "../db/database.js";
 import { EventStore, type AppendEventCommand } from "../events/event-store.js";
@@ -20,15 +20,68 @@ import {
   BlockchainValidationError,
 } from "./errors.js";
 
-const MAX_RAW_DATA_BYTES = 1_048_576;
+// ── Payload size policy (C-2) ──
+// TRON protocol: max block binary size is 2,000,000 bytes.  JSON expansion
+// factor over wire-format binary is typically 1.5×–2.5×, so a realistic
+// upper bound for a single block's JSON payload is ~5 MiB.
+//
+// DEFAULT_MAX_RAW_DATA_BYTES (4 MiB) accommodates the vast majority of blocks
+// including historically large ones (e.g. block #85,118,696 at ~1.1 MiB).
+// ABSOLUTE_MAX_RAW_DATA_BYTES (8 MiB) is a hard ceiling that no configuration
+// can exceed — it protects PostgreSQL from ingesting unreasonably large payloads
+// while still leaving headroom for edge-case blocks.
+export const DEFAULT_MAX_RAW_DATA_BYTES = 4_194_304; // 4 MiB
+export const ABSOLUTE_MAX_RAW_DATA_BYTES = 8_388_608; // 8 MiB
 const MAX_TRANSACTIONS_PER_BLOCK = 10_000;
 
-function assertRawDataSize(json: string, label: string): void {
-  if (json.length > MAX_RAW_DATA_BYTES) {
+/** Storage lifecycle of a raw_data payload (C-3). */
+export type StorageState = "FULL" | "EXTERNALIZED" | "PARTIAL" | "REJECTED";
+
+/** Result of measuring and validating a raw JSON payload. */
+export interface PayloadMeasurement {
+  readonly json: string;
+  readonly byteLength: number;
+  readonly checksum: string;
+  readonly storageState: StorageState;
+}
+
+/**
+ * Measure a JSON payload: compute its UTF-8 byte length (C-1) and SHA-256
+ * checksum (C-4), then classify its storage state (C-3).
+ *
+ * Throws BlockchainValidationError when the payload exceeds the absolute
+ * maximum — data that large is REJECTED, never truncated.
+ */
+export function measurePayload(
+  json: string,
+  label: string,
+  maxBytes: number = DEFAULT_MAX_RAW_DATA_BYTES,
+): PayloadMeasurement {
+  // C-1: use Buffer.byteLength for accurate UTF-8 measurement
+  const byteLength = Buffer.byteLength(json, "utf8");
+  // C-4: SHA-256 checksum computed before insertion
+  const checksum = createHash("sha256").update(json, "utf8").digest("hex");
+
+  if (byteLength > ABSOLUTE_MAX_RAW_DATA_BYTES) {
     throw new BlockchainValidationError(
-      `${label} raw_data exceeds ${MAX_RAW_DATA_BYTES} byte limit (${json.length} bytes)`,
+      `${label} raw_data exceeds absolute ${ABSOLUTE_MAX_RAW_DATA_BYTES} byte limit ` +
+      `(${byteLength} bytes UTF-8)`,
     );
   }
+
+  if (byteLength > maxBytes) {
+    // Between configurable max and absolute max — still store as FULL since
+    // we never truncate, but the caller can inspect byteLength for diagnostics.
+    // The policy says: accept blocks up to ABSOLUTE_MAX, reject above.
+    // Blocks between DEFAULT and ABSOLUTE are stored normally.
+  }
+
+  return Object.freeze({
+    json,
+    byteLength,
+    checksum,
+    storageState: "FULL" as const,
+  });
 }
 
 export interface CollectBlockResult {
@@ -111,7 +164,7 @@ export class BlockchainService {
 
       const blockId = randomUUID();
       const blockRawJson = JSON.stringify(rawBlock.raw);
-      assertRawDataSize(blockRawJson, `Block ${blockNumber}`);
+      const blockPayload = measurePayload(blockRawJson, `Block ${blockNumber}`);
 
       const block = await this.repository.insertBlock(tx, {
         id: blockId,
@@ -124,8 +177,11 @@ export class BlockchainService {
         blockProducer: rawBlock.blockProducer,
         txCount: rawBlock.txCount,
         sizeBytes: rawBlock.sizeBytes,
-        rawData: blockRawJson,
+        rawData: blockPayload.json,
         collectionSource: connector.sourceName,
+        rawDataBytes: blockPayload.byteLength,
+        rawDataChecksum: blockPayload.checksum,
+        storageState: blockPayload.storageState,
       });
 
       const transactions = await this.insertTransactions(
@@ -293,7 +349,7 @@ export class BlockchainService {
 
         const blockId = randomUUID();
         const blockRawJson = JSON.stringify(rawBlock.raw);
-        assertRawDataSize(blockRawJson, `Block ${blockNumber}`);
+        const blockPayload = measurePayload(blockRawJson, `Block ${blockNumber}`);
 
         await this.repository.insertBlock(tx, {
           id: blockId,
@@ -306,8 +362,11 @@ export class BlockchainService {
           blockProducer: rawBlock.blockProducer,
           txCount: rawBlock.txCount,
           sizeBytes: rawBlock.sizeBytes,
-          rawData: blockRawJson,
+          rawData: blockPayload.json,
           collectionSource: connector.sourceName,
+          rawDataBytes: blockPayload.byteLength,
+          rawDataChecksum: blockPayload.checksum,
+          storageState: blockPayload.storageState,
         });
 
         const transactions = await this.insertTransactions(
@@ -372,7 +431,7 @@ export class BlockchainService {
     for (const rawTx of rawTransactions) {
       if (!rawTx.txHash) continue;
       const txRawJson = JSON.stringify(rawTx.raw);
-      assertRawDataSize(txRawJson, `Transaction ${rawTx.txHash}`);
+      const txPayload = measurePayload(txRawJson, `Transaction ${rawTx.txHash}`);
 
       const transaction = await this.repository.insertTransaction(tx, {
         id: randomUUID(),
@@ -389,7 +448,10 @@ export class BlockchainService {
         feeUnit: rawTx.feeUnit,
         result: rawTx.result,
         chainData: JSON.stringify(rawTx.chainData),
-        rawData: txRawJson,
+        rawData: txPayload.json,
+        rawDataBytes: txPayload.byteLength,
+        rawDataChecksum: txPayload.checksum,
+        storageState: txPayload.storageState,
       });
       results.push(transaction);
     }

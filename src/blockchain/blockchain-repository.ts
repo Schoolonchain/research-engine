@@ -20,6 +20,9 @@ export interface InsertBlockParams {
   readonly sizeBytes: number | null;
   readonly rawData: string;
   readonly collectionSource: string;
+  readonly rawDataBytes?: number;
+  readonly rawDataChecksum?: string;
+  readonly storageState?: string;
 }
 
 export interface InsertTransactionParams {
@@ -38,6 +41,9 @@ export interface InsertTransactionParams {
   readonly result: string | null;
   readonly chainData: string;
   readonly rawData: string;
+  readonly rawDataBytes?: number;
+  readonly rawDataChecksum?: string;
+  readonly storageState?: string;
 }
 
 export interface BlockchainRepository {
@@ -287,14 +293,17 @@ export class SqlBlockchainRepository implements BlockchainRepository {
       `INSERT INTO blockchain_blocks (
         id, network_id, data_source_id, block_number, block_hash, parent_hash,
         block_timestamp, block_producer, tx_count, size_bytes,
-        raw_data, collection_source
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12)
+        raw_data, collection_source,
+        raw_data_bytes, raw_data_checksum, storage_state
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12,$13,$14,$15)
       RETURNING ${BLOCK_COLS}`,
       [
         params.id, params.networkId, params.dataSourceId, params.blockNumber,
         params.blockHash, params.parentHash, params.blockTimestamp,
         params.blockProducer, params.txCount, params.sizeBytes,
         params.rawData, params.collectionSource,
+        params.rawDataBytes ?? null, params.rawDataChecksum ?? null,
+        params.storageState ?? "FULL",
       ],
     );
     return toBlock(result.rows[0]!);
@@ -333,14 +342,17 @@ export class SqlBlockchainRepository implements BlockchainRepository {
       `INSERT INTO blockchain_transactions (
         id, network_id, data_source_id, block_id, tx_hash, tx_type,
         from_address, to_address, amount, fee,
-        amount_unit, fee_unit, result, chain_data, raw_data
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb,$15::jsonb)
+        amount_unit, fee_unit, result, chain_data, raw_data,
+        raw_data_bytes, raw_data_checksum, storage_state
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb,$15::jsonb,$16,$17,$18)
       RETURNING ${TX_COLS}`,
       [
         params.id, params.networkId, params.dataSourceId, params.blockId,
         params.txHash, params.txType, params.fromAddress, params.toAddress,
         params.amount, params.fee, params.amountUnit, params.feeUnit,
         params.result, params.chainData, params.rawData,
+        params.rawDataBytes ?? null, params.rawDataChecksum ?? null,
+        params.storageState ?? "FULL",
       ],
     );
     return toTransaction(result.rows[0]!);
