@@ -35,6 +35,7 @@ export interface ResearchJobView {
 
 export interface ResearchJobLease extends ResearchJobView {
   readonly leaseOwner: string;
+  readonly leaseToken: string;
   readonly leaseExpiresAt: Date;
   readonly maxCalls: number;
   readonly maxTokens: number;

@@ -643,6 +643,18 @@ propuesta no se considera aprobada hasta recibir confirmación humana.
 - Consecuencia: respuestas tardías, carreras de cancelación, fallos y outputs fuera del simulador
   determinista quedan cerrados sin incorporar IA, proveedores, PAYMENT o publicación.
 
+## D-086 — Generación de lease y consumo observable exactamente una vez
+
+- Fecha: 2026-08-10
+- Estado: IMPLEMENTADA; PENDIENTE DE REAUDITORÍA DE FASE 8
+- Decisión: cada claim genera un token UUID nuevo y lo exige junto con el worker en toda respuesta;
+  el vencimiento nunca supera el deadline. Consumir una Authorization emite exactamente una vez
+  `authorization_consumed` y su Outbox en la transacción que crea el único ResearchJob.
+- Motivo: `workerId` identifica al ejecutor, pero no distingue intentos sucesivos; el consumo sin
+  evento impedía reconstruir completamente la transición autorizada.
+- Consecuencia: una respuesta de una generación anterior no puede cerrar un intento posterior,
+  incluso con el mismo worker. Las guardas SQL e idempotencia por actor refuerzan el mismo límite.
+
 ## D-059 — Datos blockchain en tablas propias, no en sources
 
 - Fecha: 2026-07-27

@@ -67,10 +67,10 @@ export class AuthorizationService {
       const prior = await tx.query<AuthorizationRow>(
         `SELECT id, public_id, status, policy_set_hash, eligibility_score_run_id, expires_at,
           issued_by_actor_id
-         FROM authorizations WHERE idempotency_key = $1`, [key],
+         FROM authorizations WHERE issued_by_actor_id = $1 AND idempotency_key = $2`,
+        [context.actorId, key],
       );
       if (prior.rows[0]) {
-        if (prior.rows[0].issued_by_actor_id !== context.actorId) throw new ResearchConflictError("Idempotency key belongs to another actor");
         const evidence = await tx.query<{ request_hash: string }>(
           `SELECT evidence->>'requestHash' AS request_hash FROM authorizations WHERE id = $1`, [prior.rows[0].id],
         );

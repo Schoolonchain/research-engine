@@ -10,7 +10,8 @@ export class DeterministicResearchExecutor {
     const digest = createHash("sha256")
       .update(`${lease.publicId}:${lease.attempts}:phase-8-simulation`)
       .digest("hex");
-    await this.jobs.complete(lease.publicId, workerId, { calls: 1, tokens: 1, costMinor: 0 }, {
+    await this.jobs.complete(lease.publicId, workerId, lease.leaseToken,
+      { calls: 1, tokens: 1, costMinor: 0 }, {
       kind: "DETERMINISTIC_SIMULATION", digest, provider: null, publication: false,
     });
     return lease.publicId;

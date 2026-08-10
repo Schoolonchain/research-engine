@@ -107,11 +107,16 @@ describe("Phase 8 authorization and deterministic research jobs", () => {
     const results = await Promise.all(Array.from({ length: 10 }, () =>
       jobs.createFromAuthorization(authorization.publicId)));
     expect(new Set(results.map((job) => job.publicId)).size).toBe(1);
-    const counts = await raw.query<{ permits: number; jobs: number; consumed: number }>(
+    const counts = await raw.query<{ permits: number; jobs: number; consumed: number;
+      consumed_events: number; consumed_outbox: number }>(
       `SELECT (SELECT count(*)::int FROM research_jobs) AS jobs,
         (SELECT count(*)::int FROM authorizations) AS permits,
-        (SELECT count(*)::int FROM authorizations WHERE status = 'CONSUMED') AS consumed`);
-    expect(counts.rows[0]).toEqual({ permits: 1, jobs: 1, consumed: 1 });
+        (SELECT count(*)::int FROM authorizations WHERE status = 'CONSUMED') AS consumed,
+        (SELECT count(*)::int FROM domain_events WHERE event_type='authorization_consumed') AS consumed_events,
+        (SELECT count(*)::int FROM outbox_messages AS message JOIN domain_events AS event
+          ON event.event_id=message.event_id WHERE event.event_type='authorization_consumed') AS consumed_outbox`);
+    expect(counts.rows[0]).toEqual({ permits: 1, jobs: 1, consumed: 1,
+      consumed_events: 1, consumed_outbox: 1 });
   });
 
   it("blocks revoked, expired and policy-stale authorizations", async () => {
@@ -164,20 +169,23 @@ describe("Phase 8 authorization and deterministic research jobs", () => {
     const budgetLease = await jobs.claim("budget-worker", 30);
     expect(budgetLease?.publicId).toBe(budgetJob.publicId);
     await expect(jobs.complete(budgetJob.publicId, "budget-worker",
-      { calls: 2, tokens: 1, costMinor: 0 }, validOutput())).rejects.toBeInstanceOf(ResearchBudgetError);
+      budgetLease!.leaseToken, { calls: 2, tokens: 1, costMinor: 0 }, validOutput()))
+      .rejects.toBeInstanceOf(ResearchBudgetError);
 
     const cancelAuth = await issue(validator, await eligible(policyAdmin, "cancel", false), "cancel");
     const cancelJob = await jobs.createFromAuthorization(cancelAuth.publicId);
     await jobs.cancel(cancelJob.publicId);
     expect((await raw.query<{ status: string }>("SELECT status FROM research_jobs WHERE public_id = $1", [cancelJob.publicId])).rows[0]!.status).toBe("CANCELLED");
 
-    await jobs.fail(budgetJob.publicId, "budget-worker", "SIMULATED_FAILURE", 1);
+    await jobs.fail(budgetJob.publicId, "budget-worker", budgetLease!.leaseToken, "SIMULATED_FAILURE", 1);
     await raw.query("UPDATE research_jobs SET available_at = CURRENT_TIMESTAMP WHERE public_id = $1", [budgetJob.publicId]);
-    expect((await jobs.claim("retry-worker", 30))?.attempts).toBe(2);
-    await jobs.fail(budgetJob.publicId, "retry-worker", "SIMULATED_FAILURE", 1);
+    const retryLease = await jobs.claim("retry-worker", 30);
+    expect(retryLease?.attempts).toBe(2);
+    await jobs.fail(budgetJob.publicId, "retry-worker", retryLease!.leaseToken, "SIMULATED_FAILURE", 1);
     await raw.query("UPDATE research_jobs SET available_at = CURRENT_TIMESTAMP WHERE public_id = $1", [budgetJob.publicId]);
-    expect((await jobs.claim("final-worker", 30))?.attempts).toBe(3);
-    await jobs.fail(budgetJob.publicId, "final-worker", "SIMULATED_FAILURE", 1);
+    const finalLease = await jobs.claim("final-worker", 30);
+    expect(finalLease?.attempts).toBe(3);
+    await jobs.fail(budgetJob.publicId, "final-worker", finalLease!.leaseToken, "SIMULATED_FAILURE", 1);
     expect((await raw.query<{ status: string }>("SELECT status FROM research_jobs WHERE public_id = $1", [budgetJob.publicId])).rows[0]!.status).toBe("FAILED");
   });
 
@@ -212,27 +220,31 @@ describe("Phase 8 authorization and deterministic research jobs", () => {
     const jobs = new ResearchJobService(database);
     const permit = await issue(validator, await eligible(policyAdmin, "late-response"), "late-response");
     const job = await jobs.createFromAuthorization(permit.publicId);
-    await jobs.claim("old-worker", 30);
+    const oldLease = await jobs.claim("old-worker", 30);
     await raw.query(`UPDATE research_jobs SET lease_expires_at=clock_timestamp()-INTERVAL '1 second'
       WHERE public_id=$1`, [job.publicId]);
-    await expect(jobs.complete(job.publicId, "old-worker", { calls: 1, tokens: 1, costMinor: 0 },
+    await expect(jobs.complete(job.publicId, "old-worker", oldLease!.leaseToken,
+      { calls: 1, tokens: 1, costMinor: 0 },
       validOutput())).rejects.toBeInstanceOf(ResearchLeaseError);
-    expect((await jobs.claim("new-worker", 30))?.attempts).toBe(2);
-    await expect(jobs.fail(job.publicId, "old-worker", "LATE_RESPONSE", 1,
+    const newLease = await jobs.claim("new-worker", 30);
+    expect(newLease?.attempts).toBe(2);
+    await expect(jobs.fail(job.publicId, "old-worker", oldLease!.leaseToken, "LATE_RESPONSE", 1,
       { calls: 1, tokens: 1, costMinor: 0 })).rejects.toBeInstanceOf(ResearchLeaseError);
-    await jobs.complete(job.publicId, "new-worker", { calls: 1, tokens: 1, costMinor: 0 }, validOutput());
+    await jobs.complete(job.publicId, "new-worker", newLease!.leaseToken,
+      { calls: 1, tokens: 1, costMinor: 0 }, validOutput());
   });
 
   it("fails at a deadline crossed during execution and accounts consumed work", async () => {
     const policyAdmin = await context("POLICY_ADMIN", "policy-deadline");
     const validator = await context("VALIDATOR", "validator-deadline");
     const jobs = new ResearchJobService(database);
-    const permit = await issue(validator, await eligible(policyAdmin, "deadline"), "deadline");
+    const permit = await issue(validator, await eligible(policyAdmin, "deadline"), "deadline",
+      { expiresAt: new Date(Date.now() + 2_000) });
     const job = await jobs.createFromAuthorization(permit.publicId);
-    await jobs.claim("deadline-worker", 30);
-    await raw.query(`UPDATE research_jobs SET deadline_at=clock_timestamp()-INTERVAL '1 second'
-      WHERE public_id=$1`, [job.publicId]);
-    await jobs.complete(job.publicId, "deadline-worker", { calls: 1, tokens: 7, costMinor: 0 }, validOutput());
+    const deadlineLease = await jobs.claim("deadline-worker", 30);
+    await new Promise((resolve) => setTimeout(resolve, 2_100));
+    await jobs.complete(job.publicId, "deadline-worker", deadlineLease!.leaseToken,
+      { calls: 1, tokens: 7, costMinor: 0 }, validOutput());
     const result = await raw.query<{ status: string; calls_used: number; tokens_used: string }>(
       `SELECT status,calls_used,tokens_used FROM research_jobs WHERE public_id=$1`, [job.publicId]);
     expect(result.rows[0]).toEqual({ status: "FAILED", calls_used: 1, tokens_used: 7 });
@@ -247,8 +259,9 @@ describe("Phase 8 authorization and deterministic research jobs", () => {
     const jobs = new ResearchJobService(database);
     const permit = await issue(validator, await eligible(policyAdmin, "cancel-race"), "cancel-race");
     const job = await jobs.createFromAuthorization(permit.publicId);
-    await jobs.claim("race-worker", 30);
+    const raceLease = await jobs.claim("race-worker", 30);
     await Promise.allSettled([jobs.cancel(job.publicId), jobs.fail(job.publicId, "race-worker",
+      raceLease!.leaseToken,
       "SIMULATED_FAILURE", 1, { calls: 1, tokens: 2, costMinor: 0 })]);
     expect((await raw.query<{ status: string }>(`SELECT status FROM research_jobs WHERE public_id=$1`,
       [job.publicId])).rows[0]!.status).toBe("CANCELLED");
@@ -264,11 +277,13 @@ describe("Phase 8 authorization and deterministic research jobs", () => {
     const permit = await issue(validator, await eligible(policyAdmin, "failed-usage"), "failed-usage",
       { maxCalls: 2, maxTokens: 10, maxAttempts: 2 });
     const job = await jobs.createFromAuthorization(permit.publicId);
-    await jobs.claim("usage-one", 30);
-    await jobs.fail(job.publicId, "usage-one", "FIRST_FAILURE", 1, { calls: 1, tokens: 4, costMinor: 0 });
+    const usageOne = await jobs.claim("usage-one", 30);
+    await jobs.fail(job.publicId, "usage-one", usageOne!.leaseToken, "FIRST_FAILURE", 1,
+      { calls: 1, tokens: 4, costMinor: 0 });
     await raw.query(`UPDATE research_jobs SET available_at=clock_timestamp() WHERE public_id=$1`, [job.publicId]);
-    await jobs.claim("usage-two", 30);
-    await jobs.fail(job.publicId, "usage-two", "FINAL_FAILURE", 1, { calls: 1, tokens: 6, costMinor: 0 });
+    const usageTwo = await jobs.claim("usage-two", 30);
+    await jobs.fail(job.publicId, "usage-two", usageTwo!.leaseToken, "FINAL_FAILURE", 1,
+      { calls: 1, tokens: 6, costMinor: 0 });
     const result = await raw.query<{ status: string; calls_used: number; tokens_used: string; attempts: number }>(
       `SELECT status,calls_used,tokens_used,attempts FROM research_jobs WHERE public_id=$1`, [job.publicId]);
     expect(result.rows[0]).toEqual({ status: "FAILED", calls_used: 2, tokens_used: 10, attempts: 2 });
@@ -287,10 +302,11 @@ describe("Phase 8 authorization and deterministic research jobs", () => {
       const job = await jobs.createFromAuthorization(permit.publicId);
       if (outcome === "CANCELLED") await jobs.cancel(job.publicId);
       else {
-        await jobs.claim(`terminal-${suffix}`, 30);
+        const terminalLease = await jobs.claim(`terminal-${suffix}`, 30);
         if (outcome === "COMPLETED") await jobs.complete(job.publicId, `terminal-${suffix}`,
-          { calls: 1, tokens: 1, costMinor: 0 }, validOutput());
-        else await jobs.fail(job.publicId, `terminal-${suffix}`, "FINAL_FAILURE", 1,
+          terminalLease!.leaseToken, { calls: 1, tokens: 1, costMinor: 0 }, validOutput());
+        else await jobs.fail(job.publicId, `terminal-${suffix}`, terminalLease!.leaseToken,
+          "FINAL_FAILURE", 1,
           { calls: 1, tokens: 1, costMinor: 0 });
       }
       const events = await raw.query<{ event_type: string; outbox_count: number }>(
@@ -308,11 +324,12 @@ describe("Phase 8 authorization and deterministic research jobs", () => {
     const jobs = new ResearchJobService(database);
     const permit = await issue(validator, await eligible(policyAdmin, "invalid-output"), "invalid-output");
     const job = await jobs.createFromAuthorization(permit.publicId);
-    await jobs.claim("output-worker", 30);
+    const outputLease = await jobs.claim("output-worker", 30);
     for (const output of [{}, { ...validOutput(), digest: "bad" },
       { ...validOutput(), provider: "real-ai" }, { ...validOutput(), publication: true },
       { ...validOutput(), extra: "field" }]) {
-      await expect(jobs.complete(job.publicId, "output-worker", { calls: 1, tokens: 1, costMinor: 0 }, output))
+      await expect(jobs.complete(job.publicId, "output-worker", outputLease!.leaseToken,
+        { calls: 1, tokens: 1, costMinor: 0 }, output))
         .rejects.toBeInstanceOf(ResearchValidationError);
     }
   });
@@ -348,5 +365,80 @@ describe("Phase 8 authorization and deterministic research jobs", () => {
       justification: "Explicit exception approved for deterministic investigation",
       idempotencyKey: "admin-with-reason" });
     expect((await new ResearchJobService(database).createFromAuthorization(admin.publicId)).status).toBe("QUEUED");
+  });
+
+  it("requires a fresh lease generation when the same worker reclaims another attempt", async () => {
+    const policyAdmin = await context("POLICY_ADMIN", "policy-same-worker-generation");
+    const validator = await context("VALIDATOR", "validator-same-worker-generation");
+    const jobs = new ResearchJobService(database);
+    const permit = await issue(validator, await eligible(policyAdmin, "same-worker-generation"),
+      "same-worker-generation", { maxAttempts: 2 });
+    const job = await jobs.createFromAuthorization(permit.publicId);
+    const first = await jobs.claim("same-worker", 30);
+    await raw.query(`UPDATE research_jobs SET lease_expires_at=clock_timestamp()-INTERVAL '1 second'
+      WHERE public_id=$1`, [job.publicId]);
+    const second = await jobs.claim("same-worker", 30);
+    expect(second?.attempts).toBe(2);
+    expect(second?.leaseToken).not.toBe(first?.leaseToken);
+    await expect(jobs.fail(job.publicId, "same-worker", first!.leaseToken,
+      "STALE_GENERATION", 1, { calls: 1, tokens: 1, costMinor: 0 }))
+      .rejects.toBeInstanceOf(ResearchLeaseError);
+    await expect(jobs.complete(job.publicId, "same-worker", first!.leaseToken,
+      { calls: 1, tokens: 1, costMinor: 0 }, validOutput()))
+      .rejects.toBeInstanceOf(ResearchLeaseError);
+    await jobs.complete(job.publicId, "same-worker", second!.leaseToken,
+      { calls: 1, tokens: 1, costMinor: 0 }, validOutput());
+  });
+
+  it("caps every lease at the immutable job deadline", async () => {
+    const policyAdmin = await context("POLICY_ADMIN", "policy-bounded-lease");
+    const validator = await context("VALIDATOR", "validator-bounded-lease");
+    const jobs = new ResearchJobService(database);
+    const permit = await issue(validator, await eligible(policyAdmin, "bounded-lease"),
+      "bounded-lease", { expiresAt: new Date(Date.now() + 5_000) });
+    const job = await jobs.createFromAuthorization(permit.publicId);
+    const lease = await jobs.claim("bounded-worker", 300);
+    expect(lease!.leaseExpiresAt.getTime()).toBeLessThanOrEqual(job.deadlineAt.getTime());
+  });
+
+  it("isolates the same idempotency key between competing actors", async () => {
+    const policyAdmin = await context("POLICY_ADMIN", "policy-actor-idempotency");
+    const firstActor = await context("VALIDATOR", "validator-actor-one");
+    const secondActor = await context("VALIDATOR", "validator-actor-two");
+    const proposal = await eligible(policyAdmin, "actor-idempotency");
+    const expiry = new Date(Date.now() + 60_000);
+    const permits = await Promise.all([
+      issue(firstActor, proposal, "shared-actor-key", { expiresAt: expiry }),
+      issue(secondActor, proposal, "shared-actor-key", { expiresAt: expiry }),
+    ]);
+    expect(new Set(permits.map((permit) => permit.publicId)).size).toBe(2);
+    expect((await raw.query<{ count: number }>(`SELECT count(*)::int AS count FROM authorizations
+      WHERE idempotency_key='authorization-shared-actor-key'`)).rows[0]!.count).toBe(2);
+  });
+
+  it("rejects direct SQL mutation of Phase 8 grants, terminal jobs and attempt history", async () => {
+    const policyAdmin = await context("POLICY_ADMIN", "policy-sql-integrity");
+    const validator = await context("VALIDATOR", "validator-sql-integrity");
+    const jobs = new ResearchJobService(database);
+    const permit = await issue(validator, await eligible(policyAdmin, "sql-integrity"), "sql-integrity");
+    const job = await jobs.createFromAuthorization(permit.publicId);
+    await expect(raw.query(`UPDATE authorizations SET max_calls=max_calls+1 WHERE public_id=$1`,
+      [permit.publicId])).rejects.toThrow();
+    await expect(raw.query(`UPDATE authorizations SET status='VALID' WHERE public_id=$1`,
+      [permit.publicId])).rejects.toThrow();
+    await expect(raw.query(`DELETE FROM authorizations WHERE public_id=$1`, [permit.publicId])).rejects.toThrow();
+    await expect(raw.query(`UPDATE research_jobs SET max_calls=max_calls+1 WHERE public_id=$1`,
+      [job.publicId])).rejects.toThrow();
+    const lease = await jobs.claim("integrity-worker", 30);
+    await expect(raw.query(`UPDATE research_jobs SET lease_token=gen_random_uuid() WHERE public_id=$1`,
+      [job.publicId])).rejects.toThrow();
+    await jobs.complete(job.publicId, "integrity-worker", lease!.leaseToken,
+      { calls: 1, tokens: 1, costMinor: 0 }, validOutput());
+    await expect(raw.query(`UPDATE research_jobs SET status='QUEUED' WHERE public_id=$1`,
+      [job.publicId])).rejects.toThrow();
+    await expect(raw.query(`DELETE FROM research_jobs WHERE public_id=$1`, [job.publicId])).rejects.toThrow();
+    await expect(raw.query(`UPDATE research_job_attempt_usage SET calls_used=0
+      WHERE research_job_id=(SELECT id FROM research_jobs WHERE public_id=$1)`, [job.publicId]))
+      .rejects.toThrow();
   });
 });

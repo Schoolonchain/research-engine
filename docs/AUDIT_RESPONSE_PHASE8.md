@@ -14,6 +14,19 @@ La PR #16 permanece Draft. No se integra y no inicia la Fase 9.
 - **H-005:** todas las transiciones terminales, incluidas las de limpieza, producen evento y
   Outbox dentro de la misma transacción.
 
+## Segunda ronda correctiva
+
+- **H-001:** cada claim crea una generación `leaseToken` intransferible. `workerId` ya no basta;
+  un token de un intento anterior falla aunque el mismo worker reclame el siguiente.
+- **H-005:** el consumo crea `authorization_consumed` y Outbox exactamente una vez, atómicamente
+  con el ResearchJob y `research_job_created`.
+- **M-003:** `leaseExpiresAt` queda acotado estructuralmente y en el claim por `deadlineAt`.
+- **M-005:** grants, historia y estados terminales de Authorization quedan protegidos ante SQL.
+- **M-006:** ResearchJob, contadores, transiciones terminales y ledger de intentos quedan
+  protegidos ante SQL directo.
+- **M-007:** la idempotencia de emisión se acota por actor; dos actores que compiten con el mismo
+  texto de clave reciben Authorizations independientes, sin colisión ni filtración cruzada.
+
 ## MEDIUM
 
 - **M-001:** el output tiene un esquema cerrado, determinista y sin proveedor/publicación.

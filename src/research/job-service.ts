@@ -10,7 +10,8 @@ interface JobRow {
   readonly id: string; readonly public_id: string; readonly authorization_public_id: string;
   readonly status: string; readonly attempts: number; readonly max_attempts: number;
   readonly available_at: Date; readonly deadline_at: Date; readonly lease_owner?: string;
-  readonly lease_expires_at?: Date; readonly max_calls: number; readonly max_tokens: string;
+  readonly lease_expires_at?: Date; readonly lease_token?: string;
+  readonly max_calls: number; readonly max_tokens: string;
   readonly max_cost_minor: string; readonly calls_used: number; readonly tokens_used: string;
   readonly spent_cost_minor: string; readonly cancel_requested_at?: Date | null;
   readonly deadline_exceeded?: boolean;
@@ -73,7 +74,7 @@ export class ResearchJobService {
   private async cancelRunning(tx: DatabaseExecutor, row: JobRow, usage: Usage): Promise<void> {
     await this.recordUsage(tx, row, usage, "CANCELLED", "CANCEL_REQUESTED");
     await tx.query(`UPDATE research_jobs SET status = 'CANCELLED', cancelled_at = clock_timestamp(),
-      error_code = 'CANCEL_REQUESTED', lease_owner = NULL, lease_expires_at = NULL,
+      error_code = 'CANCEL_REQUESTED', lease_owner = NULL, lease_token = NULL, lease_expires_at = NULL,
       version = version + 1, updated_at = clock_timestamp() WHERE id = $1`, [row.id]);
     await this.terminalEvent(tx, row, "CANCELLED", "CANCEL_REQUESTED", "simulated_worker");
   }
@@ -96,7 +97,7 @@ export class ResearchJobService {
       await tx.query(`UPDATE research_jobs SET status = $1,
         cancelled_at = CASE WHEN $1 = 'CANCELLED' THEN clock_timestamp() ELSE cancelled_at END,
         failed_at = CASE WHEN $1 = 'FAILED' THEN clock_timestamp() ELSE failed_at END,
-        error_code = $2, lease_owner = NULL, lease_expires_at = NULL,
+        error_code = $2, lease_owner = NULL, lease_token = NULL, lease_expires_at = NULL,
         version = version + 1, updated_at = clock_timestamp() WHERE id = $3`, [status, code, row.id]);
       await this.terminalEvent(tx, row, status, code, "system");
     }
@@ -151,9 +152,15 @@ export class ResearchJobService {
         consumed_at = clock_timestamp(), version = version + 1, updated_at = clock_timestamp()
         WHERE id = $1 AND status = 'VALID'`, [authorization.id]);
       if (consumed.rowCount !== 1) throw new ResearchConflictError("Authorization consumption conflict");
-      await this.events.appendMany(tx, [{ eventId: randomUUID(), eventType: "research_job_created",
+      const correlationId = randomUUID();
+      await this.events.appendMany(tx, [{ eventId: randomUUID(), eventType: "authorization_consumed",
+        eventVersion: 1, aggregateType: "authorization", aggregateId: authorization.id,
+        expectedSequence: await eventSequence(tx, "authorization", authorization.id),
+        actor: { type: "system" }, correlationId, payload: { permitPublicId: authorizationPublicId,
+          jobPublicId: row.public_id, consumedExactlyOnce: true } },
+      { eventId: randomUUID(), eventType: "research_job_created",
         eventVersion: 1, aggregateType: "research_job", aggregateId: row.id, expectedSequence: 0,
-        actor: { type: "system" }, correlationId: randomUUID(), payload: { jobPublicId: row.public_id,
+        actor: { type: "system" }, correlationId, payload: { jobPublicId: row.public_id,
           permitPublicId: authorizationPublicId, policySetHash: authorization.policy_set_hash,
           deterministicSimulation: true } }]);
       return jobView(row);
@@ -171,7 +178,9 @@ export class ResearchJobService {
           AND cancel_requested_at IS NULL AND attempts < max_attempts AND deadline_at > clock_timestamp()
         ORDER BY priority DESC, created_at FOR UPDATE SKIP LOCKED LIMIT 1)
         UPDATE research_jobs AS job SET status = 'RUNNING', attempts = job.attempts + 1,
-          lease_owner = $1, lease_expires_at = clock_timestamp() + ($2::integer * INTERVAL '1 second'),
+          lease_owner = $1, lease_token = gen_random_uuid(),
+          lease_expires_at = LEAST(job.deadline_at,
+            clock_timestamp() + ($2::integer * INTERVAL '1 second')),
           started_at = COALESCE(job.started_at, clock_timestamp()), version = job.version + 1,
           updated_at = clock_timestamp() FROM candidate, authorizations AS permit
         WHERE job.id = candidate.id AND permit.id = job.authorization_id
@@ -179,12 +188,12 @@ export class ResearchJobService {
       const row = claimed.rows[0];
       if (!row) return null;
       return Object.freeze({ ...jobView(row), leaseOwner: row.lease_owner!,
-        leaseExpiresAt: row.lease_expires_at!, maxCalls: row.max_calls,
+        leaseToken: row.lease_token!, leaseExpiresAt: row.lease_expires_at!, maxCalls: row.max_calls,
         maxTokens: Number(row.max_tokens), maxCostMinor: Number(row.max_cost_minor) });
     });
   }
 
-  public async complete(jobPublicId: string, workerId: string, usage: Usage,
+  public async complete(jobPublicId: string, workerId: string, leaseToken: string, usage: Usage,
     output: Readonly<Record<string, unknown>>): Promise<void> {
     validateUsage(usage); validateOutput(output);
     await this.database.transaction(async (tx) => {
@@ -192,28 +201,31 @@ export class ResearchJobService {
         FROM research_jobs AS job JOIN authorizations AS permit ON permit.id = job.authorization_id
         WHERE job.public_id = $1 FOR UPDATE OF job`, [jobPublicId])).rows[0];
       if (!row) throw new ResearchNotFoundError("Research job not found");
-      if (row.status !== "RUNNING" || row.lease_owner !== workerId) throw new ResearchLeaseError("Invalid lease");
+      if (row.status !== "RUNNING" || row.lease_owner !== workerId || row.lease_token !== leaseToken)
+        throw new ResearchLeaseError("Invalid lease generation");
       const timing = await tx.query<{ lease_valid: boolean; deadline_valid: boolean }>(
         `SELECT $1::timestamptz > clock_timestamp() AS lease_valid,
           $2::timestamptz > clock_timestamp() AS deadline_valid`, [row.lease_expires_at, row.deadline_at]);
-      if (!timing.rows[0]?.lease_valid) throw new ResearchLeaseError("Expired lease");
-      if (row.cancel_requested_at) { await this.cancelRunning(tx, row, usage); return; }
-      if (!timing.rows[0].deadline_valid) {
+      const timingRow = timing.rows[0];
+      if (!timingRow) throw new ResearchLeaseError("Unable to validate lease");
+      if (!timingRow.deadline_valid) {
         await this.recordUsage(tx, row, usage, "FAILED", "DEADLINE_EXCEEDED");
         await tx.query(`UPDATE research_jobs SET status='FAILED', failed_at=clock_timestamp(),
-          error_code='DEADLINE_EXCEEDED', lease_owner=NULL, lease_expires_at=NULL,
+          error_code='DEADLINE_EXCEEDED', lease_owner=NULL, lease_token=NULL, lease_expires_at=NULL,
           version=version+1, updated_at=clock_timestamp() WHERE id=$1`, [row.id]);
         await this.terminalEvent(tx, row, "FAILED", "DEADLINE_EXCEEDED", "simulated_worker"); return;
       }
+      if (!timingRow.lease_valid) throw new ResearchLeaseError("Expired lease");
+      if (row.cancel_requested_at) { await this.cancelRunning(tx, row, usage); return; }
       await this.recordUsage(tx, row, usage, "COMPLETED", null);
       await tx.query(`UPDATE research_jobs SET status='COMPLETED', execution_output=$1::jsonb,
-        completed_at=clock_timestamp(), lease_owner=NULL, lease_expires_at=NULL,
+        completed_at=clock_timestamp(), lease_owner=NULL, lease_token=NULL, lease_expires_at=NULL,
         version=version+1, updated_at=clock_timestamp() WHERE id=$2`, [JSON.stringify(output), row.id]);
       await this.terminalEvent(tx, row, "COMPLETED", null, "simulated_worker");
     });
   }
 
-  public async fail(jobPublicId: string, workerId: string, errorCode: string,
+  public async fail(jobPublicId: string, workerId: string, leaseToken: string, errorCode: string,
     retryDelaySeconds: number, usage: Usage = { calls: 0, tokens: 0, costMinor: 0 }): Promise<void> {
     validateUsage(usage);
     if (!/^[A-Z][A-Z0-9_]{0,99}$/.test(errorCode) || !Number.isSafeInteger(retryDelaySeconds) || retryDelaySeconds < 1 || retryDelaySeconds > 300) throw new ResearchValidationError("Invalid failure");
@@ -222,19 +234,29 @@ export class ResearchJobService {
         FROM research_jobs AS job JOIN authorizations AS permit ON permit.id=job.authorization_id
         WHERE job.public_id=$1 FOR UPDATE OF job`, [jobPublicId])).rows[0];
       if (!row) throw new ResearchNotFoundError("Research job not found");
-      if (row.status !== "RUNNING" || row.lease_owner !== workerId) throw new ResearchLeaseError("Invalid lease");
+      if (row.status !== "RUNNING" || row.lease_owner !== workerId || row.lease_token !== leaseToken)
+        throw new ResearchLeaseError("Invalid lease generation");
       const timing = await tx.query<{ lease_valid: boolean; deadline_valid: boolean }>(
         `SELECT $1::timestamptz > clock_timestamp() AS lease_valid,
           $2::timestamptz > clock_timestamp() AS deadline_valid`, [row.lease_expires_at, row.deadline_at]);
-      if (!timing.rows[0]?.lease_valid) throw new ResearchLeaseError("Expired lease");
+      const timingRow = timing.rows[0];
+      if (!timingRow) throw new ResearchLeaseError("Unable to validate lease");
+      const exhausted = row.attempts >= row.max_attempts || !timingRow.deadline_valid;
+      const finalCode = !timingRow.deadline_valid ? "DEADLINE_EXCEEDED" : errorCode;
+      if (!timingRow.deadline_valid) {
+        await this.recordUsage(tx, row, usage, "FAILED", finalCode);
+        await tx.query(`UPDATE research_jobs SET status='FAILED', failed_at=clock_timestamp(),
+          error_code=$1, lease_owner=NULL, lease_token=NULL, lease_expires_at=NULL,
+          version=version+1, updated_at=clock_timestamp() WHERE id=$2`, [finalCode, row.id]);
+        await this.terminalEvent(tx, row, "FAILED", finalCode, "simulated_worker"); return;
+      }
+      if (!timingRow.lease_valid) throw new ResearchLeaseError("Expired lease");
       if (row.cancel_requested_at) { await this.cancelRunning(tx, row, usage); return; }
-      const exhausted = row.attempts >= row.max_attempts || !timing.rows[0].deadline_valid;
-      const finalCode = !timing.rows[0].deadline_valid ? "DEADLINE_EXCEEDED" : errorCode;
       await this.recordUsage(tx, row, usage, "FAILED", finalCode);
       await tx.query(`UPDATE research_jobs SET status=$1,
         available_at=CASE WHEN $1='QUEUED' THEN clock_timestamp()+($2*INTERVAL '1 second') ELSE available_at END,
         failed_at=CASE WHEN $1='FAILED' THEN clock_timestamp() ELSE NULL END,
-        error_code=$3, lease_owner=NULL, lease_expires_at=NULL,
+        error_code=$3, lease_owner=NULL, lease_token=NULL, lease_expires_at=NULL,
         version=version+1, updated_at=clock_timestamp() WHERE id=$4`,
       [exhausted ? "FAILED" : "QUEUED", retryDelaySeconds, finalCode, row.id]);
       if (exhausted) await this.terminalEvent(tx, row, "FAILED", finalCode, "simulated_worker");

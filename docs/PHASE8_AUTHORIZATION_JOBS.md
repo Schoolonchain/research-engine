@@ -15,7 +15,8 @@ registra actor, snapshot observado y política activa. Ambos tipos tienen inicio
 presupuestos y una clave idempotente. Solo admite `ADMIN` y `THRESHOLD`; la migración `0022`
 rechaza estructuralmente `PAYMENT`.
 
-La emisión concurrente se serializa mediante un receipt append-only. Revocar requiere motivo,
+La emisión concurrente se serializa mediante un receipt append-only y la clave idempotente se
+acota al actor: dos actores no comparten respuestas aunque usen el mismo texto de clave. Revocar requiere motivo,
 es idempotente por clave y por estado: repetir el mismo motivo no crea otro evento; intentar
 cambiar el motivo ya persistido produce conflicto. Una Authorization consumida no puede revocarse.
 
@@ -28,14 +29,18 @@ cambiar el motivo ya persistido produce conflicto. Una Authorization consumida n
 - `policySetHash` de la activación global más reciente;
 - ausencia de un ResearchJob previo.
 
-La FK única `research_jobs.authorization_id` y el bloqueo garantizan exactamente un job. Los
+La FK única `research_jobs.authorization_id` y el bloqueo garantizan exactamente un job. El cambio
+a `CONSUMED`, el evento `authorization_consumed`, su Outbox y `research_job_created` se confirman
+en la misma transacción y ocurren exactamente una vez. Los
 reintentos devuelven ese mismo job. Una rotación de política obliga a emitir otra Authorization.
 
 ## Cola, leases y límites
 
 Los jobs nacen `QUEUED`. El claim usa `FOR UPDATE SKIP LOCKED`, recupera leases vencidos,
 incrementa intentos y aplica `maxAttempts`, `availableAt` y `deadlineAt`. Solo el propietario
-de un lease vigente puede completar o declarar fallo.
+de un lease vigente puede completar o declarar fallo. Cada claim genera un `leaseToken` UUID
+nuevo, también si el mismo `workerId` recupera otro intento; `complete` y `fail` exigen ambos.
+`leaseExpiresAt` siempre es el mínimo entre la duración pedida y el deadline del job.
 
 La finalización y el fallo bloquean la fila y usan `clock_timestamp()` después del bloqueo para
 rechazar respuestas tardías, leases vencidos y deadlines cruzados durante la ejecución. Comprueban
@@ -53,6 +58,12 @@ de limpieza de leases/deadlines, escribe exactamente un evento y un mensaje Outb
 Persiste exclusivamente el contrato cerrado `DETERMINISTIC_SIMULATION` con digest SHA-256,
 `provider: null` y `publication: false`; rechaza campos extra, proveedores, publicación o digests
 inválidos. No accede a red, modelos, prompts, PAYMENT o Knowledge Hub.
+
+## Integridad SQL
+
+Triggers de base de datos bloquean borrados, cambios de grants, reducción de contadores,
+transiciones inválidas, modificación de terminales y alteración del ledger de intentos. Estas
+reglas complementan las comprobaciones del servicio y preservan historia e invariantes ante SQL directo.
 
 ## Consistencia de política en consumidores
 
